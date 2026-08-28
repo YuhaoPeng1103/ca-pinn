@@ -1,0 +1,45 @@
+# Training outputs (regenerable by running the experiment scripts)
+outputs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# LaTeX build artifacts (paper/)
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.bbl
+paper/*.blg
+paper/*.pdf
+paper/*.fls
+paper/*.fdb_latexmk
+paper/*.synctex.gz
+paper/missfont.log
+
+# Deprecated / unused files
+paper/iclr2027/
+paper/figures/ablation_final.pdf
+paper/figures/ablation_summary.pdf
+paper/figures/ca-pinn_depth.pdf
+paper/figures/ca_pinn_depth.pdf
+paper/figures/sparse_comparison.pdf
+paper/figures/vanilla_depth.pdf
+paper/figures/vanilla_pinn_depth.pdf
+paper/figures/water_depth_fields.pdf
+
+# Historical paper backups (NeurIPS / ICLR versions)
+paper_backup_20260819/
+paper_backup_iclr_20260819/
+
+# LaTeX temp
+texput.log
+paper/main.spl
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
