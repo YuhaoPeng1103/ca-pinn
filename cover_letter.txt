@@ -1,0 +1,27 @@
+Dear Editor,
+
+We are pleased to submit our manuscript entitled "Adaptive Loss Balancing for Physics-Informed Neural Networks in Hydrodynamic Inverse Problems: Design Principles from Full-Convergence Experiments" for consideration for publication in Computer Methods in Applied Mechanics and Engineering (CMAME).
+
+Physics-informed neural networks (PINNs) have emerged as a promising framework for solving partial differential equations, but their training is hindered by multi-task gradient imbalance and causality violation. In this work, we systematically investigate how gradient-based loss balancing (ReLoBRaLo) and causal time-domain weighting interact with parameter priors in PINN inverse problems, using full-convergence (30,000-epoch) experiments on the 2D shallow water equations with a localized drainage sink, plus generalization studies on the Burgers equation and the Navier-Stokes cylinder wake.
+
+Our main contributions are:
+
+1. A design principle that adaptive loss balancing must exclude parameter priors to avoid re-ill-posing inverse problems, backed by a gradient-decoupling argument grounded in neural-tangent-kernel (NTK) theory.
+2. Full-convergence experiments showing that balancing the prior drives the drainage-coefficient error from 0.047% to 37.2% (a 791-fold degradation), while fixed-weight priors preserve sub-percent parameter recovery.
+3. A conditional view of causal training, which fails to transfer to Adam-only optimization across three PDE benchmarks, including strongly time-dependent vortex shedding.
+4. A physically consistent finite-volume reference solution (Lax-Friedrichs) for the shallow-water equations, verified for mass conservation to within 0.1% of the inflow.
+
+We believe this work is well suited to CMAME because it provides concrete, reproducible design principles for PINN-based hydrodynamic inverse problems, a topic of growing interest to the computational mechanics community. The reference solution is computed with a verified finite-volume solver, and the manuscript reports full-convergence and multi-seed statistics, in line with the numerical rigor expected by CMAME.
+
+The manuscript is original, has not been published previously, and is not under consideration for publication elsewhere. All authors have read and approved the submission.
+
+The source code is publicly available at https://github.com/YuhaoPeng1103/ca-pinn.
+
+Thank you for considering our manuscript. We look forward to your response.
+
+Sincerely,
+
+Yuhao Peng
+School of Mathematics and Physics, China University of Geosciences (Wuhan)
+Wuhan, China
+Email: 3136496634@qq.com
