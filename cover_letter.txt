@@ -2,7 +2,7 @@ August 28, 2026
 
 Dear Editor,
 
-We are pleased to submit our manuscript entitled "Adaptive Loss Balancing for Physics-Informed Neural Networks in Hydrodynamic Inverse Problems: Design Principles from Full-Convergence Experiments" for consideration for publication in the Journal of Computational Physics.
+We are pleased to submit our manuscript entitled "Gradient Decoupling in Adaptive Loss Balancing for Physics-Informed Neural Network Inverse Problems: A Provable Failure Mode and Design Principle" for consideration for publication in the Journal of Computational Physics.
 
 The manuscript contributes a methodological result for physics-informed neural networks (PINNs), rather than an application of PINNs to a specific physical system. We identify and formally prove a failure mode of gradient-based multi-task loss balancing in PINN inverse problems, and we validate the resulting design principle through a systematic, full-convergence evaluation.
 
