@@ -1,21 +1,24 @@
+August 28, 2026
+
 Dear Editor,
 
-We are pleased to submit our manuscript entitled "Adaptive Loss Balancing for Physics-Informed Neural Networks in Hydrodynamic Inverse Problems: Design Principles from Full-Convergence Experiments" for consideration for publication in Computer Methods in Applied Mechanics and Engineering (CMAME).
+We are pleased to submit our manuscript entitled "Adaptive Loss Balancing for Physics-Informed Neural Networks in Hydrodynamic Inverse Problems: Design Principles from Full-Convergence Experiments" for consideration for publication in the Journal of Computational Physics.
 
-Physics-informed neural networks (PINNs) have emerged as a promising framework for solving partial differential equations, but their training is hindered by multi-task gradient imbalance and causality violation. In this work, we systematically investigate how gradient-based loss balancing (ReLoBRaLo) and causal time-domain weighting interact with parameter priors in PINN inverse problems, using full-convergence (30,000-epoch) experiments on the 2D shallow water equations with a localized drainage sink, plus generalization studies on the Burgers equation and the Navier-Stokes cylinder wake.
+The manuscript contributes a methodological result for physics-informed neural networks (PINNs), rather than an application of PINNs to a specific physical system. We identify and formally prove a failure mode of gradient-based multi-task loss balancing in PINN inverse problems, and we validate the resulting design principle through a systematic, full-convergence evaluation.
 
-Our main contributions are:
+Our contributions are:
 
-1. A design principle that adaptive loss balancing must exclude parameter priors to avoid re-ill-posing inverse problems, backed by a gradient-decoupling argument grounded in neural-tangent-kernel (NTK) theory.
-2. Full-convergence experiments showing that balancing the prior drives the drainage-coefficient error from 0.047% to 37.2% (a 791-fold degradation), while fixed-weight priors preserve sub-percent parameter recovery.
-3. A conditional view of causal training, which fails to transfer to Adam-only optimization across three PDE benchmarks, including strongly time-dependent vortex shedding.
-4. A physically consistent finite-volume reference solution (Lax-Friedrichs) for the shallow-water equations, verified for mass conservation to within 0.1% of the inflow.
+1. A provable failure mechanism (gradient decoupling). We show, via a formal proposition with proof, that when a gradient-norm-based balancer (e.g., ReLoBRaLo) uses the last-layer weights as its anchor, any loss term that depends only on parameters decoupled from that anchor — such as a parameter prior in an inverse problem — has exactly zero anchor gradient. Consequently, balancing the prior drives its weight geometrically to zero and re-ill-poses the inverse problem. The argument is general: it applies to any gradient-norm balancer and any anchor-decoupled auxiliary loss.
 
-We believe this work is well suited to CMAME because it provides concrete, reproducible design principles for PINN-based hydrodynamic inverse problems, a topic of growing interest to the computational mechanics community. The reference solution is computed with a verified finite-volume solver, and the manuscript reports full-convergence and multi-seed statistics, in line with the numerical rigor expected by CMAME.
+2. Quantitative validation of the mechanism. At full convergence (30,000 epochs) on a 2D shallow-water inverse problem, balancing the prior drives the drainage-coefficient error from 0.047% to 37.2% (a 791-fold degradation), while fixing the prior weight preserves sub-percent parameter recovery (n: 0.045%, C: 0.047%).
 
-The manuscript is original, has not been published previously, and is not under consideration for publication elsewhere. All authors have read and approved the submission.
+3. A systematic, statistically robust evaluation. We report full-convergence results across three PDE benchmarks (shallow water, Burgers, Navier-Stokes cylinder wake) and multi-seed statistics (mean ± std over independent seeds), which most PINN studies omit.
 
-The source code is publicly available at https://github.com/YuhaoPeng1103/ca-pinn.
+4. A verified reference solver. The shallow-water reference is computed by a mass-conserving Lax-Friedrichs finite-volume scheme (conservation to within 0.1% of the inflow), so all reported errors are measured against a physically consistent ground truth.
+
+We believe this work fits the scope of JCP because it addresses a foundational training question for PINNs — how should loss terms be weighted, and when does adaptive balancing fail? — with a provable mechanism and rigorous, reproducible experiments, rather than reporting results for a single application.
+
+The manuscript is original, has not been published previously, and is not under consideration for publication elsewhere. All authors have read and approved the submission. The source code is publicly available at https://github.com/YuhaoPeng1103/ca-pinn.
 
 Thank you for considering our manuscript. We look forward to your response.
 
