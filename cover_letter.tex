@@ -14,20 +14,20 @@ August 28, 2026
 
 Dear Editor,
 
-We are pleased to submit our manuscript entitled ``Gradient Decoupling in Adaptive Loss Balancing for Physics-Informed Neural Network Inverse Problems: A Provable Failure Mode and Design Principle'' for consideration for publication in the \textit{Journal of Computational Physics}.
+We are pleased to submit our manuscript entitled ``Gradient Decoupling in Adaptive Loss Balancing for Physics-Informed Neural Network Inverse Problems: A Provable Failure Mode and Design Principle'' for consideration for publication in \textit{Neurocomputing}.
 
-The manuscript contributes a \textbf{methodological result} for physics-informed neural networks (PINNs), rather than an application of PINNs to a specific physical system. We identify and formally prove a failure mode of gradient-based multi-task loss balancing in PINN \emph{inverse} problems, and we validate the resulting design principle through a systematic, full-convergence evaluation.
+The manuscript contributes a \textbf{methodological result} for training physics-informed neural networks (PINNs), rather than an application of PINNs to a specific physical system. We identify and formally prove a failure mode of gradient-based multi-task loss balancing in PINN inverse problems, and we validate the resulting design principle through a systematic, full-convergence evaluation.
 
 Our contributions are:
 
 \begin{enumerate}
-\item \textbf{A provable failure mechanism (gradient decoupling).} We show, via a formal proposition with proof, that when a gradient-norm-based balancer (e.g., ReLoBRaLo) uses the last-layer weights as its anchor, any loss term that depends only on parameters decoupled from that anchor---such as a parameter prior in an inverse problem---has exactly zero anchor gradient. Consequently, balancing the prior drives its weight geometrically to zero and re-ill-poses the inverse problem. The argument is general: it applies to any gradient-norm balancer and any anchor-decoupled auxiliary loss.
-\item \textbf{Quantitative validation of the mechanism.} At full convergence (30,000 epochs) on a 2D shallow-water inverse problem, balancing the prior drives the drainage-coefficient error from 0.047\% to 37.2\% (a 791-fold degradation), while fixing the prior weight preserves sub-percent parameter recovery ($n$: 0.045\%, $C$: 0.047\%).
+\item \textbf{A provable failure mechanism (gradient decoupling).} We show, via a formal proposition with proof, that when a gradient-norm-based balancer (e.g., ReLoBRaLo) uses the last-layer weights as its anchor, any loss term that depends only on parameters decoupled from that anchor---such as a parameter prior in an inverse problem---has exactly zero anchor gradient. Consequently, balancing the prior drives its weight geometrically to zero and re-ill-poses the inverse problem. The argument is general: it applies to any gradient-norm balancer and any anchor-decoupled auxiliary loss, so it extends beyond PINNs to any multi-task learning setting with a decoupled regularization term.
+\item \textbf{Quantitative validation of the mechanism.} At full convergence (30,000 epochs) on a shallow-water inverse problem, balancing the prior drives a physical-parameter error from 0.047\% to 37.2\% (a 791-fold degradation), while fixing the prior weight preserves sub-percent recovery.
 \item \textbf{A systematic, statistically robust evaluation.} We report full-convergence results across three PDE benchmarks (shallow water, Burgers, Navier--Stokes cylinder wake) and multi-seed statistics (mean $\pm$ std over independent seeds), which most PINN studies omit.
 \item \textbf{A verified reference solver.} The shallow-water reference is computed by a mass-conserving Lax--Friedrichs finite-volume scheme (conservation to within 0.1\% of the inflow), so all reported errors are measured against a physically consistent ground truth.
 \end{enumerate}
 
-We believe this work fits the scope of JCP because it addresses a foundational training question for PINNs---\emph{how should loss terms be weighted, and when does adaptive balancing fail?}---with a provable mechanism and rigorous, reproducible experiments, rather than reporting results for a single application.
+We believe this work fits the scope of Neurocomputing because it addresses a foundational question in neural-network training---\emph{how should loss terms be weighted, and when does adaptive balancing fail?}---with a provable mechanism and rigorous, reproducible experiments. The gradient-decoupling argument is a general property of gradient-norm-based loss balancing, of direct relevance to the multi-task learning and physics-informed machine-learning communities served by Neurocomputing.
 
 The manuscript is original, has not been published previously, and is not under consideration for publication elsewhere. All authors have read and approved the submission. The source code is publicly available at \texttt{https://github.com/YuhaoPeng1103/ca-pinn}.
 
