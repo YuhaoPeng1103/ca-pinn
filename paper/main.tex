@@ -16,7 +16,7 @@
 \newtheorem{proposition}{Proposition}
 \newtheorem{corollary}{Corollary}
 
-\journal{Neurocomputing}
+\journal{Neural Networks}
 
 \begin{document}
 
@@ -647,8 +647,9 @@ that the baseline behaviour is stable.
 \toprule
 Configuration & $\epsilon_h$ & $\epsilon_n$ & $\epsilon_C$ \\
 \midrule
-ReLoBRaLo          & $0.592 \pm 0.018$ & $0.041 \pm 0.001$ & $0.039$ \\
-LL-EMA             & $0.549 \pm 0.012$ & $0.054 \pm 0.005$ & $0.067$ \\
+No balancing       & $0.549 \pm 0.012$ & $0.054 \pm 0.005$ & $0.067$ \\
+LL-EMA             & $0.592 \pm 0.018$ & $0.041 \pm 0.001$ & $0.039$ \\
+Causal weighting   & $0.919 \pm 0.007$ & $1.669 \pm 0.005$ & $2.814$ \\
 LL-EMA + causal    & $1.216 \pm 0.016$ & $2.535 \pm 0.071$ & $3.276$ \\
 \bottomrule
 \end{tabular}
@@ -657,29 +658,16 @@ LL-EMA + causal    & $1.216 \pm 0.016$ & $2.535 \pm 0.071$ & $3.276$ \\
 Standard deviations are small (below $3\%$ relative for $\epsilon_h$), so the
 qualitative behaviour reported above is not a seed artefact.
 
-\subsection{Generalisation to Other PDEs}
+\subsection{Generalisation to Another PDE}
 
 To check that the mechanism is not specific to the shallow-water problem we
-repeat the comparison on two further benchmarks: the 1D viscous Burgers
-equation ($\nu = 0.01/\pi$, analytical Cole--Hopf reference) and the 2D
-Navier--Stokes cylinder wake at $\mathrm{Re}=100$ (CFD data of
-\cite{raissi2019physics}).
-
-\begin{table}[t]
-\centering
-\caption{Relative $L_2$ error on Burgers ($20{,}000$ epochs).}
-\label{tab:burgers}
-\begin{tabular}{lcc}
-\toprule
-Configuration & $\epsilon_u$ \\
-\midrule
-No balancing (unit weights) & $1.94\times10^{-1}$ \\
-LL-EMA & $\mathbf{1.88\times10^{-1}}$ \\
-Causal weighting & $3.16\times10^{-1}$ \\
-Both & $3.89\times10^{-1}$ \\
-\bottomrule
-\end{tabular}
-\end{table}
+repeat the comparison on the 2D Navier--Stokes cylinder wake at
+$\mathrm{Re}=100$, using the CFD data of \cite{raissi2019physics}. This is a
+\emph{forward} problem: the loss consists of a PDE residual and a data misfit
+only, and there is no parameter prior, so the decoupling mechanism of
+Proposition~\ref{prop:decoupling} is absent by construction. The point of the
+comparison is therefore to confirm that the wrapper does not disturb ordinary
+balancing when no loss is decoupled.
 
 \begin{table}[t]
 \centering
@@ -698,14 +686,14 @@ Both & $1.93\times10^{-1}$ & $9.81\times10^{-1}$ \\
 \end{tabular}
 \end{table}
 
-Neither benchmark has a parameter prior, so the decoupling mechanism is absent
-and the balancers behave conventionally: balancing gives a small improvement
-on Burgers ($1.88$ vs $1.94\times10^{-1}$) and no improvement on the
-Navier--Stokes wake, where the un-balanced baseline is best. These results are
-consistent with the view that adaptive balancing helps when there is genuine
-multi-task tension to resolve, and is at best neutral otherwise. Causal
-weighting degrades both, which we report for completeness; it is a separate
-mechanism from the per-loss balancing studied here.
+With no decoupled loss the balancers behave conventionally: the un-balanced
+baseline is best on both velocity components, and balancing gives no
+improvement. This is consistent with the view that adaptive balancing helps
+when there is genuine multi-task tension to resolve and is at best neutral
+otherwise; it also confirms that the wrapper is inert when nothing is
+decoupled, since it acts only on losses flagged by the diagnostic. Causal
+weighting degrades the result, which we report for completeness; it is a
+separate mechanism from the per-loss balancing studied here.
 
 % ======================================================================
 \section{Discussion}
@@ -779,13 +767,21 @@ implementations, the diagnostic and the anchor-robust wrapper, is available at
 \url{https://github.com/YuhaoPeng1103/ca-pinn}.
 
 % ======================================================================
+\section*{Declaration of generative AI and AI-assisted technologies in the writing process}
+% ======================================================================
+
+During the preparation of this work the author used generative AI tools to
+assist with code implementation and debugging, and to draft and polish
+portions of the manuscript. All AI-assisted code was tested against analytical
+or numerically verified reference solutions, and all AI-assisted text was
+reviewed and edited by the author, who takes full responsibility for the
+content of the publication.
+
+% ======================================================================
 \section*{Acknowledgments}
 % ======================================================================
 
-The authors acknowledge the foundational PINN codebase by Maziar Raissi et al.
-Generative AI tools were used to assist with code implementation and debugging,
-and to draft and polish portions of the manuscript; all AI-assisted work was
-reviewed and verified by the authors.
+The author acknowledges the foundational PINN codebase by Maziar Raissi et al.
 
 % ======================================================================
 \bibliographystyle{elsarticle-num}

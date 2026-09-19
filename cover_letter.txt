@@ -2,25 +2,23 @@ September 19, 2026
 
 Dear Editor,
 
-We are pleased to submit our manuscript entitled "Silent Failure of Adaptive Loss Balancing in Physics-Informed Inverse Problems: Diagnosis and a Fix" for consideration for publication in Neurocomputing.
+We are pleased to submit our manuscript entitled "Silent Failure of Adaptive Loss Balancing in Physics-Informed Inverse Problems: Diagnosis and a Fix" for consideration for publication in Neural Networks.
 
-The manuscript identifies and fixes a failure mode of adaptive loss balancing that affects any physics-informed neural network trained with a heterogeneous loss set. Gradient-norm balancers estimate each loss's magnitude from its gradient with respect to an anchor parameter subset; when a loss is decoupled from that anchor, the estimate is identically zero, and the balancer acts on a meaningless number without raising any error or perturbing the reported training loss.
+The manuscript concerns the training of neural networks under composite, heterogeneous objectives — the setting of physics-informed learning, but equally of multi-task learning in general. Adaptive loss balancing methods weight the individual terms of such objectives using gradient statistics. We identify a failure mode that is intrinsic to this family of methods, prove it, provide a cheap diagnostic for it, and propose a fix.
 
 Our contributions are:
 
-1. A provable characterisation of the failure. We show that two widely used families of balancers respond to the same decoupled loss in opposite directions: relative-norm balancers drive the weight to zero (the loss is silently switched off), while inverse-ratio balancers such as learning-rate annealing divide by a vanishing gradient and drive the weight to infinity (the loss dominates everything else). The direction is a property of the balancer's functional form, not of the problem.
+1. A provable characterisation of the failure. Every gradient-norm balancer estimates a loss's magnitude from its gradient with respect to an anchor parameter subset. If a loss is decoupled from that anchor, the estimate is identically zero. We show that the resulting failure has a direction fixed by the balancer's functional form: relative-norm balancers drive the weight to zero, silently switching the loss off, while inverse-ratio balancers such as learning-rate annealing divide by a vanishing gradient and drive the weight to infinity. Neither raises an error nor perturbs the reported training loss.
 
-2. A run-time diagnostic. The anchor-coupling ratio c_k = ||grad_phi L_k|| / ||grad_full L_k|| measures the fraction of a loss's gradient energy that lies on the anchor. It costs one additional backward pass per loss and needs only periodic evaluation. A value near zero flags a loss whose balanced weight cannot be trusted.
+2. A run-time diagnostic. The anchor-coupling ratio c_k = ||grad_anchor L_k|| / ||grad_full L_k|| measures the fraction of a loss's gradient energy that lies on the anchor. It costs one additional backward pass per loss, needs only periodic evaluation, and applies to any balancer — including those, like ReLoBRaLo, that do not themselves use gradients.
 
-3. A method that fixes both directions. The anchor-robust balancer is a wrapper around any existing balancer. It probes the coupling ratios periodically and replaces the weight of each decoupled loss with the mean weight of the visible ones, so the loss is neither discarded nor allowed to dominate. It requires no manual intervention and no prior knowledge of which loss is affected, and it leaves the visible losses' weights exactly as the base method would have produced them.
+3. A method that fixes both directions. The anchor-robust balancer wraps any existing balancer. It probes the coupling ratios periodically and replaces the weight of each decoupled loss with the mean weight of the visible ones, so that the loss is neither discarded nor allowed to dominate. It requires no manual intervention and no prior knowledge of which loss is affected, and it leaves the visible losses' weights exactly as the base method would have produced them.
 
-4. Quantitative evidence. On a 2D shallow-water inverse problem with a parameter prior, a last-layer-anchored balancer produces a drainage-coefficient error of 52.9%, while a full-parameter inverse-ratio balancer drives the prior weight to 3.3e7. The wrapper repairs both, reducing the parameter error to 0.030% and bounding the weight at 1.0, a 1773-fold improvement for the relative-norm case.
+4. Quantitative evidence. On a 2D shallow-water inverse problem, a last-layer-anchored balancer produces a parameter error of 52.9%, while a full-parameter inverse-ratio balancer drives the weight of the decoupled term to 3.3e7. The wrapper repairs both, reducing the parameter error to 0.030% and bounding the weight at 1.0 — a 1773-fold improvement in the former case.
 
-The work also reports an identifiability analysis: in this weakly identified problem the recovered parameters are prior-determined rather than data-determined, which is precisely why the balancer's treatment of a single loss term can change the answer by orders of magnitude. We suggest a prior-perturbation check as a general safeguard.
+We believe the work is well suited to Neural Networks because the mechanism is a general property of gradient-norm loss balancing rather than a physics-specific artefact: any anchor that fails to cover the parameters a loss depends on produces the same silent failure, and the diagnostic and wrapper are directly usable in any multi-task training pipeline. The manuscript also reports an identifiability analysis showing that in the weakly identified test problem the recovered parameters are prior-determined, which is precisely why the treatment of a single loss term can change the answer by orders of magnitude.
 
-We believe the work fits Neurocomputing because the mechanism is a general property of gradient-norm loss balancing in multi-task learning, not a PINN-specific artefact: any anchor that fails to cover the parameters a loss depends on produces the same silent failure. The diagnostic and the wrapper are directly usable by practitioners, and the code is publicly available.
-
-The manuscript is original, has not been published previously, and is not under consideration for publication elsewhere. All authors have read and approved the submission.
+The manuscript is original, has not been published previously, and is not under consideration for publication elsewhere. The author has read and approved the submission.
 
 The source code is publicly available at https://github.com/YuhaoPeng1103/ca-pinn.
 

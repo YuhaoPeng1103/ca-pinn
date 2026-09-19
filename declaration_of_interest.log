@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.26 (TeX Live 2024) (preloaded format=pdflatex 2026.7.6)  31 AUG 2026 12:10
+This is pdfTeX, Version 3.141592653-2.6-1.40.26 (TeX Live 2024) (preloaded format=pdflatex 2026.7.6)  19 SEP 2026 11:55
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -119,12 +119,12 @@ Here is how much of TeX's memory you used:
  19008 multiletter control sequences out of 15000+600000
  470472 words of font info for 32 fonts, out of 8000000 for 9000
  14 hyphenation exceptions out of 8191
- 55i,5n,62p,230b,139s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 55i,5n,62p,219b,139s stack positions out of 10000i,1000n,20000p,200000b,200000s
  </home/pngyuo/miniconda3/share/texmf-dist/f
 onts/pk/ljfour/public/cm/cmr10.657pk> </home/pngyuo/miniconda3/share/texmf-dist
 /fonts/pk/ljfour/public/cm/cmbx10.657pk> </home/pngyuo/miniconda3/share/texmf-d
 ist/fonts/pk/ljfour/public/cm/cmbx12.720pk>
-Output written on declaration_of_interest.pdf (1 page, 26257 bytes).
+Output written on declaration_of_interest.pdf (1 page, 26183 bytes).
 PDF statistics:
  104 PDF objects out of 1000 (max. 8388607)
  16 compressed objects within 1 object stream

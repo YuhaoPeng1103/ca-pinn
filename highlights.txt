@@ -1,0 +1,6 @@
+Highlights
+
+- Gradient-norm loss balancers fail silently on losses decoupled from their anchor.
+- The failure direction is fixed by the balancer: weight collapses to zero or explodes.
+- A cheap anchor-coupling ratio detects invisible losses at run time.
+- An anchor-robust wrapper fixes both directions with no manual tuning.
