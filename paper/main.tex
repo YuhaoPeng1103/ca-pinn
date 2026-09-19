@@ -26,7 +26,7 @@
 Inverse Problems: Diagnosis and a Fix}
 
 \author[1]{Yuhao Peng\corref{cor1}}
-\ead{3136496634@qq.com}
+\ead{pngyuo@cug.edu.cn}
 
 \affiliation[1]{organization={School of Mathematics and Physics, China University of Geosciences (Wuhan)},
             city={Wuhan},
@@ -108,14 +108,18 @@ prior's magnitude as zero, and the consequences are entirely determined by how
 the balancer uses that estimate:
 
 \begin{itemize}
-\item a \textbf{relative-norm} balancer
+\item a \textbf{relative-norm} balancer with a restricted anchor
 ($\lambda_k \propto \lVert\nabla_\phi \mathcal{L}_k\rVert /
-\max_j \lVert\nabla_\phi \mathcal{L}_j\rVert$) sees a zero numerator and drives
-$\lambda_{\text{prior}} \to 0$: the prior is \emph{silently switched off};
-\item an \textbf{inverse-ratio} balancer
-($\lambda_k = \max_j\lVert\nabla_\theta \mathcal{L}_j\rVert /
-\lVert\nabla_\theta \mathcal{L}_k\rVert$, i.e.\ learning-rate annealing) sees a
-vanishing denominator and drives $\lambda_{\text{prior}} \to \infty$: the prior
+\max_j \lVert\nabla_\phi \mathcal{L}_j\rVert$, $\phi = W_L$) sees a numerator
+that vanishes identically and drives $\lambda_{\text{prior}} \to 0$: the prior
+is \emph{silently switched off};
+\item an \textbf{inverse-ratio} balancer such as learning-rate annealing
+($\lambda_k = \max_j\lVert\nabla_\phi \mathcal{L}_j\rVert /
+\lVert\nabla_\phi \mathcal{L}_k\rVert$, $\phi = \theta$) anchors on the whole
+parameter vector, so the prior is only \emph{weakly} coupled rather than
+decoupled --- its gradient norm counts three non-zero components against the
+tens of thousands of a loss spread over the network. The denominator is small
+but not zero, and $\lambda_{\text{prior}}$ grows until the prior
 \emph{dominates everything else}.
 \end{itemize}
 
@@ -222,6 +226,11 @@ balancer's update rule. Both families in \S\ref{sec:intro} are of this form:
 relative-norm balancers set $\Psi_k \propto \|\nabla_\phi \mathcal{L}_k\| /
 \max_j \|\nabla_\phi \mathcal{L}_j\|$, and inverse-ratio balancers set
 $\Psi_k = \max_j \|\nabla_\phi \mathcal{L}_j\| / \|\nabla_\phi \mathcal{L}_k\|$.
+The two differ not only in $\Psi_k$ but in the anchor they choose: the
+relative-norm variant studied here takes the last layer,
+$\phi = W_L$, while learning-rate annealing takes the full parameter vector,
+$\phi = \theta$. This choice, which is usually made for computational reasons
+and rarely stated, is what determines whether a loss can be balanced at all.
 
 \begin{proposition}[Anchor decoupling]
 \label{prop:decoupling}
@@ -302,7 +311,8 @@ parameter anchoring therefore avoids the collapse but not the over-weighting.
 % ======================================================================
 
 Proposition~\ref{prop:decoupling} suggests a direct test. Define the
-\emph{anchor-coupling ratio} of loss $k$ as
+\emph{anchor-coupling ratio} of loss $k$ with respect to a \emph{probe anchor}
+$\phi$ as
 
 \begin{equation}
 c_k \;=\; \frac{\lVert \nabla_\phi \mathcal{L}_k \rVert}
@@ -311,10 +321,23 @@ c_k \;=\; \frac{\lVert \nabla_\phi \mathcal{L}_k \rVert}
 \label{eq:coupling}
 \end{equation}
 
-the fraction of the loss's gradient energy that lies on the anchor. A loss
-that is fully visible to the anchor has $c_k \approx 1$; a decoupled loss has
-$c_k = 0$ exactly. Values in between indicate partial coupling, for which the
-balancer's estimate is biased but not meaningless.
+the fraction of the loss's gradient energy that lies on $\phi$. A loss that is
+fully visible to $\phi$ has $c_k \approx 1$; a loss that is decoupled from it
+has $c_k = 0$ exactly. Values in between indicate partial coupling, for which
+a balancer's estimate is biased but not meaningless.
+
+The probe anchor is deliberately chosen to be the last layer, $\phi = W_L$,
+\emph{independently of whatever anchor the base balancer uses}. The question
+\eqref{eq:coupling} answers is not ``does this balancer see the loss?'' but the
+more basic ``does this loss flow through the network at all?''. A loss that is
+invisible to $W_L$ --- a prior on physical parameters, for instance --- has only
+a handful of non-zero gradient components out of the many thousands in
+$\theta$. Its gradient norm is therefore negligible under \emph{any} anchor,
+which is why such a loss is mishandled by both balancer families: the
+relative-norm family responds to the negligible norm by driving the weight to
+zero, and the inverse-ratio family, which divides by it, by driving the weight
+up. Probing with the last layer detects this once, in a way that is
+independent of the base method.
 
 The diagnostic is cheap and easy to deploy:
 
@@ -340,7 +363,10 @@ threshold $c_k < 10^{-3}$ to flag a loss as decoupled.
 The diagnostic tells us \emph{which} losses cannot be balanced; we now use it
 to make balancing safe. The \emph{anchor-robust balancer} (ARB) wraps an
 arbitrary base balancer and modifies only the weights of the losses the
-diagnostic flags:
+diagnostic flags. The probe anchor is the last layer, as in
+\eqref{eq:coupling}, and is chosen once and for all; it need not --- and in
+general will not --- coincide with the anchor the base balancer differentiates
+against. The procedure is:
 
 \begin{enumerate}
 \item every $M$ iterations, evaluate $c_k$ for all $k$ and mark
@@ -810,7 +836,7 @@ parameter inference.
 \section*{Declaration of Competing Interest}
 % ======================================================================
 
-The authors declare that they have no known competing financial interests or
+The author declares that he has no known competing financial interests or
 personal relationships that could have appeared to influence the work reported
 in this paper.
 
