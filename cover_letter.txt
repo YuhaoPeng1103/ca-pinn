@@ -1,24 +1,28 @@
-August 28, 2026
+September 19, 2026
 
 Dear Editor,
 
-We are pleased to submit our manuscript entitled "Gradient Decoupling in Adaptive Loss Balancing for Physics-Informed Neural Network Inverse Problems: A Provable Failure Mode and Design Principle" for consideration for publication in Neurocomputing.
+We are pleased to submit our manuscript entitled "Silent Failure of Adaptive Loss Balancing in Physics-Informed Inverse Problems: Diagnosis and a Fix" for consideration for publication in Neurocomputing.
 
-The manuscript contributes a methodological result for training physics-informed neural networks (PINNs), rather than an application of PINNs to a specific physical system. We identify and formally prove a failure mode of gradient-based multi-task loss balancing in PINN inverse problems, and we validate the resulting design principle through a systematic, full-convergence evaluation.
+The manuscript identifies and fixes a failure mode of adaptive loss balancing that affects any physics-informed neural network trained with a heterogeneous loss set. Gradient-norm balancers estimate each loss's magnitude from its gradient with respect to an anchor parameter subset; when a loss is decoupled from that anchor, the estimate is identically zero, and the balancer acts on a meaningless number without raising any error or perturbing the reported training loss.
 
 Our contributions are:
 
-1. A provable failure mechanism (gradient decoupling). We show, via a formal proposition with proof, that when a gradient-norm-based balancer (e.g., ReLoBRaLo) uses the last-layer weights as its anchor, any loss term that depends only on parameters decoupled from that anchor — such as a parameter prior in an inverse problem — has exactly zero anchor gradient. Consequently, balancing the prior drives its weight geometrically to zero and re-ill-poses the inverse problem. The argument is general: it applies to any gradient-norm balancer and any anchor-decoupled auxiliary loss, so it extends beyond PINNs to any multi-task learning setting with a decoupled regularization term.
+1. A provable characterisation of the failure. We show that two widely used families of balancers respond to the same decoupled loss in opposite directions: relative-norm balancers drive the weight to zero (the loss is silently switched off), while inverse-ratio balancers such as learning-rate annealing divide by a vanishing gradient and drive the weight to infinity (the loss dominates everything else). The direction is a property of the balancer's functional form, not of the problem.
 
-2. Quantitative validation of the mechanism. At full convergence (30,000 epochs) on a shallow-water inverse problem, balancing the prior drives a physical-parameter error from 0.047% to 37.2% (a 791-fold degradation), while fixing the prior weight preserves sub-percent recovery.
+2. A run-time diagnostic. The anchor-coupling ratio c_k = ||grad_phi L_k|| / ||grad_full L_k|| measures the fraction of a loss's gradient energy that lies on the anchor. It costs one additional backward pass per loss and needs only periodic evaluation. A value near zero flags a loss whose balanced weight cannot be trusted.
 
-3. A systematic, statistically robust evaluation. We report full-convergence results across three PDE benchmarks (shallow water, Burgers, Navier-Stokes cylinder wake) and multi-seed statistics (mean ± std over independent seeds), which most PINN studies omit.
+3. A method that fixes both directions. The anchor-robust balancer is a wrapper around any existing balancer. It probes the coupling ratios periodically and replaces the weight of each decoupled loss with the mean weight of the visible ones, so the loss is neither discarded nor allowed to dominate. It requires no manual intervention and no prior knowledge of which loss is affected, and it leaves the visible losses' weights exactly as the base method would have produced them.
 
-4. A verified reference solver. The shallow-water reference is computed by a mass-conserving Lax-Friedrichs finite-volume scheme (conservation to within 0.1% of the inflow), so all reported errors are measured against a physically consistent ground truth.
+4. Quantitative evidence. On a 2D shallow-water inverse problem with a parameter prior, a last-layer-anchored balancer produces a drainage-coefficient error of 52.9%, while a full-parameter inverse-ratio balancer drives the prior weight to 3.3e7. The wrapper repairs both, reducing the parameter error to 0.030% and bounding the weight at 1.0, a 1773-fold improvement for the relative-norm case.
 
-We believe this work fits the scope of Neurocomputing because it addresses a foundational question in neural-network training — how should loss terms be weighted, and when does adaptive balancing fail? — with a provable mechanism and rigorous, reproducible experiments. The gradient-decoupling argument is a general property of gradient-norm-based loss balancing, of direct relevance to the multi-task learning and physics-informed machine-learning communities served by Neurocomputing.
+The work also reports an identifiability analysis: in this weakly identified problem the recovered parameters are prior-determined rather than data-determined, which is precisely why the balancer's treatment of a single loss term can change the answer by orders of magnitude. We suggest a prior-perturbation check as a general safeguard.
 
-The manuscript is original, has not been published previously, and is not under consideration for publication elsewhere. All authors have read and approved the submission. The source code is publicly available at https://github.com/YuhaoPeng1103/ca-pinn.
+We believe the work fits Neurocomputing because the mechanism is a general property of gradient-norm loss balancing in multi-task learning, not a PINN-specific artefact: any anchor that fails to cover the parameters a loss depends on produces the same silent failure. The diagnostic and the wrapper are directly usable by practitioners, and the code is publicly available.
+
+The manuscript is original, has not been published previously, and is not under consideration for publication elsewhere. All authors have read and approved the submission.
+
+The source code is publicly available at https://github.com/YuhaoPeng1103/ca-pinn.
 
 Thank you for considering our manuscript. We look forward to your response.
 

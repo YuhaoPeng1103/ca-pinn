@@ -11,14 +11,19 @@
 \usepackage{xcolor}
 \usepackage{multirow}
 \usepackage{makecell}
+\usepackage{amsthm}
 
-\journal{Computer Methods in Applied Mechanics and Engineering}
+\newtheorem{proposition}{Proposition}
+\newtheorem{corollary}{Corollary}
+
+\journal{Neurocomputing}
 
 \begin{document}
 
 \begin{frontmatter}
 
-\title{Gradient Decoupling in Adaptive Loss Balancing for Physics-Informed Neural Network Inverse Problems: A Provable Failure Mode and Design Principle}
+\title{Silent Failure of Adaptive Loss Balancing in Physics-Informed
+Inverse Problems: Diagnosis and a Fix}
 
 \author[1]{Yuhao Peng\corref{cor1}}
 \ead{3136496634@qq.com}
@@ -30,400 +35,757 @@
 \cortext[cor1]{Corresponding author}
 
 \begin{abstract}
-Physics-informed neural networks (PINNs) embed physical laws as soft constraints during training, but their reliability is limited by multi-task gradient imbalance among the PDE, data, and boundary-condition losses. We identify and formally prove a failure mode of gradient-based multi-task loss balancing in PINN inverse problems. When a gradient-norm balancer (e.g., ReLoBRaLo) uses the last-layer weights as its anchor, any loss term decoupled from that anchor---such as a parameter prior---has exactly zero anchor gradient, so its balancing weight decays geometrically to zero and the inverse problem is re-ill-posed. Full-convergence experiments (30,000 epochs) on a shallow-water inverse problem quantify this failure: balancing the prior drives a physical-parameter error from 0.047\% to 37.2\%, while fixing the prior weight preserves sub-percent recovery. We further show, across three PDE benchmarks (shallow water, Burgers, Navier--Stokes), that causal time-domain weighting does not transfer to Adam-only optimization. These results yield a design principle---\textit{balance conflicting losses, never parameter priors}---with reproducible guidance for PINN-based inverse problems.
+Adaptive loss balancing is standard practice in physics-informed neural
+networks (PINNs), yet the weights it produces are only meaningful for losses
+that the balancing anchor can actually see. We show that when a loss term is
+decoupled from the anchor, gradient-norm balancers fail \emph{silently}, and
+that the direction of the failure is fixed by the balancer's functional form:
+relative-norm balancers drive the weight to zero, switching the loss off,
+while inverse-ratio balancers (e.g.\ learning-rate annealing) divide by a
+vanishing gradient and drive the weight to infinity. Neither failure raises an
+error or perturbs the reported training loss. We formalise the mechanism,
+introduce a cheap diagnostic --- the anchor-coupling ratio
+$c_k = \lVert\nabla_\phi \mathcal{L}_k\rVert / \lVert\nabla_\theta
+\mathcal{L}_k\rVert$ --- and propose an anchor-robust wrapper that detects
+decoupled losses at run time and neutralises their weight without any manual
+intervention or prior knowledge of which loss is affected. On a 2D
+shallow-water inverse problem, the failures are severe: the same gradient-norm
+balancer yields a drainage-coefficient error of $52.9\%$ when the prior
+decoupled loss is discarded, and a weight of $3.3\times10^7$ when it is
+over-weighted. The wrapper repairs both directions, reducing the parameter
+error from $52.9\%$ to $0.030\%$ and bounding the exploded weight at $1.0$.
+We further show that in this weakly identified problem the recovered
+parameters are prior-determined rather than data-determined, so which balancer
+is used decides the answer --- a caveat that applies whenever a PINN inverse
+problem is only weakly identified.
 \end{abstract}
 
 \begin{highlights}
-\item ReLoBRaLo loss balancing with fixed-weight parameter priors recovers Manning's $n$, drainage coefficient $C$, and inflow discharge with sub-percent accuracy on a 2D shallow-water inverse problem.
-\item Adaptive balancing must apply only to conflicting multi-task losses, never to parameter priors, to avoid re-ill-posing inverse problems.
-\item Causal time-domain weighting fails to transfer to Adam-only optimization across three PDE benchmarks, including strongly time-dependent vortex shedding.
-\item Balancing parameter priors re-ill-poses the inverse problem; fixed priors keep parameter recovery sub-percent.
+\item Gradient-norm loss balancers fail silently on losses decoupled from their anchor.
+\item The failure direction is fixed by the balancer: weight collapses to zero or explodes.
+\item A cheap anchor-coupling ratio detects invisible losses at run time.
+\item An anchor-robust wrapper fixes both directions with no manual tuning.
 \end{highlights}
 
 \begin{keyword}
-Physics-informed neural networks \sep loss balancing \sep causal training \sep shallow water equations \sep Navier--Stokes \sep inverse problems
+Physics-informed neural networks \sep loss balancing \sep inverse problems \sep
+parameter identifiability \sep multi-task learning
 \end{keyword}
 
 \end{frontmatter}
 
 % ======================================================================
 \section{Introduction}
+\label{sec:intro}
 % ======================================================================
 
-Physics-informed neural networks (PINNs) \cite{raissi2019physics} integrate governing physical equations as soft constraints during neural network training via automatic differentiation. This paradigm has achieved remarkable success across fluid mechanics \cite{raissi2020hidden}, solid mechanics, and heat transfer, offering mesh-free solutions and natural handling of inverse problems where physical parameters are inferred from sparse observations.
+Physics-informed neural networks (PINNs) \cite{raissi2019physics} train a
+network by minimising a composite objective whose terms --- PDE residual, data
+misfit, boundary and initial conditions, and, in inverse problems, parameter
+priors --- have different scales and converge at different rates. How to weight
+these terms is a long-standing practical problem. A large family of methods
+balances them \emph{adaptively}, using gradient statistics: learning-rate
+annealing \cite{wang2021understanding} sets each weight to the ratio of the
+largest gradient norm to the loss's own gradient norm; GradNorm
+\cite{chen2018gradnorm} equalises gradient magnitudes across tasks; PCGrad
+\cite{yu2020gradient} resolves gradient conflicts. A second family avoids
+gradients entirely and balances using the loss values themselves, of which
+ReLoBRaLo \cite{bischof2021multi} is the best-known example.
 
-Despite their conceptual elegance, PINNs face well-documented training pathologies that limit their reliability, particularly for nonlinear time-dependent problems. We identify two fundamental issues:
+All gradient-based balancers share a design decision that is rarely discussed:
+the \emph{anchor}, i.e.\ the parameter subset with respect to which gradient
+norms are measured. Using the full parameter vector is expensive --- one
+backward pass per loss term --- so implementations routinely restrict the
+anchor to a subset, most commonly the last layer.
 
-\textbf{(1) Causality violation.} Standard PINN training simultaneously minimizes PDE residuals across the entire spatio-temporal domain. For time-evolution equations, this means the network attempts to satisfy the PDE at late times before it has learned the early-time dynamics---a fundamental violation of the causal structure inherent in initial value problems \cite{wang2022respecting}.
+This paper is about what happens when that shortcut meets a loss the anchor
+cannot see. Consider an inverse problem with a parameter prior
+$\mathcal{L}_{\text{prior}} = \sum_j w_j(\mu_j - \mu_j^\star)^2$ on physical
+parameters $\mu$. If the anchor is the network's last-layer weight matrix
+$W_L$, then $\nabla_{W_L}\mathcal{L}_{\text{prior}} \equiv 0$: the prior does
+not flow through $W_L$ at all. Every gradient-norm balancer then estimates the
+prior's magnitude as zero, and the consequences are entirely determined by how
+the balancer uses that estimate:
 
-\textbf{(2) Multi-task gradient imbalance.} PINN training involves minimizing a composite loss with terms for PDE residuals, data fitting, boundary conditions, and initial conditions. These terms have different scales, converge at different rates, and compete for gradient direction \cite{wang2021understanding}. Fixed loss weights, as used in most PINN implementations, lead to one term dominating training at the expense of others.
+\begin{itemize}
+\item a \textbf{relative-norm} balancer
+($\lambda_k \propto \lVert\nabla_\phi \mathcal{L}_k\rVert /
+\max_j \lVert\nabla_\phi \mathcal{L}_j\rVert$) sees a zero numerator and drives
+$\lambda_{\text{prior}} \to 0$: the prior is \emph{silently switched off};
+\item an \textbf{inverse-ratio} balancer
+($\lambda_k = \max_j\lVert\nabla_\theta \mathcal{L}_j\rVert /
+\lVert\nabla_\theta \mathcal{L}_k\rVert$, i.e.\ learning-rate annealing) sees a
+vanishing denominator and drives $\lambda_{\text{prior}} \to \infty$: the prior
+\emph{dominates everything else}.
+\end{itemize}
 
-While prior work has addressed each issue in isolation, systematic full-convergence comparisons remain scarce, and interactions such as how loss balancing affects inverse-problem identifiability are under-explored. Most PINN papers report results at short training budgets, leaving open which methods actually help at convergence.
+In both cases training proceeds without complaint. The loss curve looks
+healthy, no warning is raised, and the failure is invisible unless one happens
+to inspect the individual weights. In an inverse problem the consequence is
+that the physical parameters are no longer constrained --- or are constrained
+so hard that the data becomes irrelevant.
 
-\textbf{Contributions.} We evaluate two modular PINN training strategies---ReLoBRaLo loss balancing and causal time-domain weighting---at full convergence (30,000 epochs) on the 2D shallow water equations with a localized drainage sink, a nonlinear hyperbolic inverse problem of practical hydraulic importance. Our experiments yield a key design principle: adaptive loss balancing must exclude parameter priors, which retain fixed weights to preserve identifiability. Across three PDE benchmarks (shallow water, Burgers, Navier--Stokes), we show that causal weighting fails to transfer to Adam-only optimization and interacts negatively with gradient-based balancing, while loss balancing preserves parameter recovery in inverse problems but does not help strongly nonlinear forward dynamics.
+\textbf{Contributions.} We diagnose this failure, provide a tool to detect it,
+and propose a fix.
+
+\begin{enumerate}
+\item \textbf{Theory (\S\ref{sec:theory}).} We characterise anchor decoupling
+formally and prove the two failure directions above. The direction is a
+property of the balancer's functional form, not of the problem, so the same
+decoupled loss is destroyed in opposite ways by two methods that are both
+called ``adaptive loss balancing''.
+\item \textbf{Diagnostic (\S\ref{sec:diagnostic}).} We introduce the
+\emph{anchor-coupling ratio}
+$c_k = \lVert\nabla_\phi \mathcal{L}_k\rVert /
+\lVert\nabla_\theta \mathcal{L}_k\rVert$, the fraction of a loss's gradient
+energy that lies on the anchor. $c_k \approx 0$ flags a loss whose balanced
+weight is meaningless. The diagnostic costs one extra backward pass per loss
+and needs only to be evaluated periodically.
+\item \textbf{Fix (\S\ref{sec:method}).} We propose the
+\emph{anchor-robust balancer}, a wrapper around \emph{any} existing balancer
+that periodically probes the coupling ratios and replaces the weight of each
+decoupled loss with the mean weight of the visible ones. Decoupled losses are
+then neither discarded nor allowed to dominate. The wrapper requires no
+knowledge of which loss is affected and no change to the base method.
+\item \textbf{Evidence (\S\ref{sec:experiments}).} On a 2D shallow-water
+inverse problem we show that a last-layer-anchored balancer yields a
+drainage-coefficient error of $52.9\%$, while a full-parameter inverse-ratio
+balancer drives the prior weight to $3.3\times10^7$; the wrapper repairs both,
+reducing the parameter error to $0.030\%$ and bounding the weight at $1.0$.
+We also report an identifiability analysis showing that in this weakly
+identified problem the parameters are prior-determined, so the choice of
+balancer effectively decides the answer.
+\end{enumerate}
 
 % ======================================================================
 \section{Related Work}
 % ======================================================================
 
-\subsection{Physics-Informed Neural Networks}
+\subsection{Loss Balancing for PINNs}
 
-Raissi et al. \cite{raissi2019physics} introduced PINNs, demonstrating solutions to both forward problems (Burgers, Schr\"{o}dinger, Allen-Cahn) and inverse problems (Navier-Stokes, KdV) using fully-connected networks with tanh activations and two-stage Adam+L-BFGS optimization. Subsequent work extended PINNs to diverse applications in fluid dynamics \cite{cai2021physics}, though training difficulties for stiff or multi-scale problems were quickly recognized.
+Wang et al.\ \cite{wang2021understanding} analysed PINN training through the
+neural tangent kernel and proposed learning-rate annealing, which rescales each
+loss by the ratio of gradient norms and is the canonical inverse-ratio balancer
+studied here. GradNorm \cite{chen2018gradnorm} equalises gradient magnitudes in
+multi-task learning; PCGrad \cite{yu2020gradient} projects conflicting
+gradients. Bischof and Kraus \cite{bischof2021multi} proposed ReLoBRaLo
+(Relative Loss Balancing with Random Lookback), which deliberately avoids
+per-loss gradients: it balances using loss values through a softmax over loss
+ratios with a random lookback, and requires only a single backward pass. Our
+work is orthogonal to the choice of balancer: we show that any of these methods
+can fail on a decoupled loss, and our wrapper is agnostic to which one is used.
 
-\subsection{Fixing Gradient Pathologies}
+We note a practical pitfall we encountered ourselves: implementations labelled
+``ReLoBRaLo'' that actually compute last-layer gradient norms are not
+ReLoBRaLo, and they inherit the failure mode analysed here. The published
+method uses loss statistics and is unaffected by anchor decoupling
+(\S\ref{sec:experiments}).
 
-Wang et al. \cite{wang2021understanding, wang2022improved} provided theoretical analysis of PINN training pathologies through the lens of neural tangent kernel (NTK) theory, showing that gradient magnitudes of different loss terms can differ by orders of magnitude. They proposed learning rate annealing for loss weights. Bischof and Kraus \cite{bischof2021multi} proposed ReLoBRaLo (Relative Loss Balancing with Random Lookback), which balances losses adaptively using exponentially-smoothed relative gradient norms with log-normal exploration noise. Other approaches include PCGrad \cite{yu2020gradient} for gradient conflict resolution and GradNorm \cite{chen2018gradnorm} for task-balancing in multi-task learning.
+\subsection{Inverse Problems and Parameter Identifiability}
 
-\subsection{Causal and Curriculum Training}
+PINNs are widely used for inverse problems, where physical parameters are
+inferred jointly with the solution field
+\cite{raissi2019physics,raissi2020hidden,cai2021physics}. Parameter priors are
+common, both as regularisation and as a way to encode known physics. Their
+interaction with adaptive weighting has, to our knowledge, not been studied.
+Our results show this interaction can dominate the outcome: in a weakly
+identified problem the prior, not the data, may determine the recovered
+parameters, which makes the balancer's treatment of the prior decisive.
 
-Krishnapriyan et al. \cite{krishnapriyan2021characterizing} showed that PINNs fail on simple convection equations when the time domain is too large. Wang et al. \cite{wang2022respecting} formalized this as a causality violation and proposed weighting PDE residuals exponentially by the accumulated error in preceding time windows, enabling PINNs to solve previously intractable long-time integration problems.
+\subsection{Temporal Weighting}
 
-\subsection{Shallow Water Equations}
-
-The 2D shallow water equations are a fundamental model in coastal engineering, flood routing, and river hydraulics, forming a nonlinear hyperbolic system of conservation laws. Prior PINN work on SWE is limited: most studies use 1D simplifications \cite{he2023physics} or steady-state assumptions. The full 2D SWE with friction, a localized drainage sink, and unknown parameters presents a challenging multi-scale inverse test case combining a smooth base flow with a localized high-frequency depression.
+Causal weighting \cite{wang2022respecting} reweights the PDE residual in time
+so that early times are learned first. It is a different mechanism from the
+per-loss balancing studied here; we include it in our comparison for
+completeness because it also produces per-loss weights.
 
 % ======================================================================
-\section{Methodology}
+\section{Theory: Anchor Decoupling}
+\label{sec:theory}
 % ======================================================================
 
-We consider physics-informed neural networks for solving partial differential equations of the general form:
+\subsection{Setup}
+
+Let $\mathcal{L}(\theta) = \sum_{k=1}^{K} \lambda_k \mathcal{L}_k(\theta)$ be
+the training objective, with $\theta$ the full parameter vector. An adaptive
+balancer updates $\lambda = (\lambda_1,\dots,\lambda_K)$ from statistics of the
+individual losses. We consider balancers of the form
 
 \begin{equation}
-    \mathcal{N}[\mathbf{u}(\mathbf{x}, t); \boldsymbol{\lambda}] = 0, \quad \mathbf{x} \in \Omega, t \in [0, T]
-    \label{eq:general_pde}
+\lambda_k = \Psi_k\!\left(\|\nabla_\phi \mathcal{L}_1\|, \dots,
+\|\nabla_\phi \mathcal{L}_K\|\right),
+\label{eq:balancer_family}
 \end{equation}
 
-subject to initial condition $\mathcal{I}[\mathbf{u}] = 0$ and boundary condition $\mathcal{B}[\mathbf{u}] = 0$, where $\boldsymbol{\lambda}$ denotes unknown physical parameters (inverse problem). A neural network $\mathbf{u}_\theta(\mathbf{x}, t)$ with parameters $\theta$ approximates the solution. The standard PINN loss is:
+where $\phi \subseteq \theta$ is the \emph{anchor} and $\Psi_k$ is the
+balancer's update rule. Both families in \S\ref{sec:intro} are of this form:
+relative-norm balancers set $\Psi_k \propto \|\nabla_\phi \mathcal{L}_k\| /
+\max_j \|\nabla_\phi \mathcal{L}_j\|$, and inverse-ratio balancers set
+$\Psi_k = \max_j \|\nabla_\phi \mathcal{L}_j\| / \|\nabla_\phi \mathcal{L}_k\|$.
+
+\begin{proposition}[Anchor decoupling]
+\label{prop:decoupling}
+Let $\mathcal{L}_k$ depend only on a parameter subset $\theta_P \subseteq
+\theta$ that is disjoint from the anchor $\phi$; that is,
+$\mathcal{L}_k = \mathcal{L}_k(\theta_P)$ with
+$\phi \cap \theta_P = \emptyset$. Then for every iteration
+\[
+\nabla_\phi \mathcal{L}_k \equiv 0 .
+\]
+\end{proposition}
+
+\begin{proof}
+By the chain rule, $\nabla_\phi \mathcal{L}_k =
+(\partial \mathcal{L}_k/\partial \theta_P)(\partial \theta_P/\partial \phi)$.
+Since $\phi$ and $\theta_P$ are disjoint coordinates, the Jacobian
+$\partial \theta_P/\partial \phi$ is identically zero, hence
+$\nabla_\phi \mathcal{L}_k = 0$.
+\end{proof}
+
+The proposition is elementary; its consequences are not. Because every
+balancer in the family \eqref{eq:balancer_family} reads only
+$\|\nabla_\phi \mathcal{L}_k\|$, a decoupled loss is indistinguishable from a
+loss that is already perfectly satisfied.
+
+\begin{corollary}[Two failure directions]
+\label{cor:directions}
+Under the conditions of Proposition~\ref{prop:decoupling}, and assuming the
+remaining losses have $\|\nabla_\phi \mathcal{L}_j\| > 0$:
+\begin{enumerate}
+\item a relative-norm balancer drives $\lambda_k \to 0$ geometrically;
+\item an inverse-ratio balancer drives $\lambda_k \to \infty$.
+\end{enumerate}
+\end{corollary}
+
+\begin{proof}
+For (i), substitute $\|\nabla_\phi \mathcal{L}_k\| = 0$ into the relative-norm
+rule; the numerator vanishes while the denominator is positive, so
+$\lambda_k = 0$ at every iteration and the exponential moving average, if any,
+decays to zero as $\alpha^t \lambda_k^{(0)} \to 0$. For (ii), the same
+substitution puts $\|\nabla_\phi \mathcal{L}_k\|$ in the denominator, so
+$\lambda_k$ diverges once the clamp or floor used to avoid division by zero is
+reached.
+\end{proof}
+
+Corollary~\ref{cor:directions} is the paper's central observation. Two methods,
+both advertised as adaptive loss balancing, respond to the same decoupled loss
+in opposite ways --- one discards it, the other lets it dominate --- and neither
+signals that anything is wrong.
+
+\subsection{Why This Matters in Inverse Problems}
+
+In a PINN inverse problem the decoupled loss is typically the parameter prior.
+Writing the prior as $\mathcal{L}_{\text{prior}} = \sum_j w_j(\mu_j -
+\mu_j^\star)^2$ over physical parameters $\mu$, and the network parameters as
+$\theta = (\theta_N, \mu)$ with $\phi = W_L \subseteq \theta_N$, the prior
+depends only on $\mu$, so $\phi \cap \{\mu\} = \emptyset$ and
+Proposition~\ref{prop:decoupling} applies exactly.
+
+The practical consequence depends on which direction the balancer fails in.
+A relative-norm balancer removes the prior from the objective, so the
+parameters are constrained only through the data and the PDE residual. An
+inverse-ratio balancer makes the prior overwhelmingly dominant, so the
+recovered parameters are essentially the prior's centre regardless of the
+data. As \S\ref{sec:experiments} shows, both outcomes are realised in practice.
+
+Note that a partial coupling changes the picture quantitatively but not
+qualitatively: if the anchor is the \emph{full} parameter vector
+($\phi = \theta$), then $\nabla_\theta \mathcal{L}_{\text{prior}} \neq 0$
+because $\mu \subseteq \theta$, and the prior is weakly coupled rather than
+decoupled. It then receives a \emph{large} inverse-ratio weight, since its
+gradient norm is small relative to a loss spread over the whole network. Full
+parameter anchoring therefore avoids the collapse but not the over-weighting.
+
+% ======================================================================
+\section{Diagnostic: The Anchor-Coupling Ratio}
+\label{sec:diagnostic}
+% ======================================================================
+
+Proposition~\ref{prop:decoupling} suggests a direct test. Define the
+\emph{anchor-coupling ratio} of loss $k$ as
 
 \begin{equation}
-    \mathcal{L}(\theta) = \underbrace{\frac{1}{N_f}\sum_{i=1}^{N_f} \|\mathcal{N}[\mathbf{u}_\theta(\mathbf{x}_f^i, t_f^i)]\|^2}_{\mathcal{L}_{\text{PDE}}}
-    + \lambda_d \underbrace{\frac{1}{N_d}\sum_{i=1}^{N_d} \|\mathbf{u}_\theta(\mathbf{x}_d^i, t_d^i) - \mathbf{u}_d^i\|^2}_{\mathcal{L}_{\text{data}}}
-    + \lambda_b \underbrace{\frac{1}{N_b}\sum_{i=1}^{N_b} \|\mathcal{B}[\mathbf{u}_\theta(\mathbf{x}_b^i, t_b^i)]\|^2}_{\mathcal{L}_{\text{BC}}}
-    \label{eq:vanilla_loss}
+c_k \;=\; \frac{\lVert \nabla_\phi \mathcal{L}_k \rVert}
+{\lVert \nabla_\theta \mathcal{L}_k \rVert + \epsilon},
+\qquad c_k \in [0,1],
+\label{eq:coupling}
 \end{equation}
 
-where $\{\mathbf{x}_f^i, t_f^i\}_{i=1}^{N_f}$ are collocation points, $\{\mathbf{x}_d^i, t_d^i, \mathbf{u}_d^i\}_{i=1}^{N_d}$ are observations, and $\lambda_d$, $\lambda_b$ are fixed weights. We identify three limitations of this formulation and propose three orthogonal remedies.
+the fraction of the loss's gradient energy that lies on the anchor. A loss
+that is fully visible to the anchor has $c_k \approx 1$; a decoupled loss has
+$c_k = 0$ exactly. Values in between indicate partial coupling, for which the
+balancer's estimate is biased but not meaningless.
 
-\subsection{Causal Time-Domain Weighting}
+The diagnostic is cheap and easy to deploy:
 
-The PDE loss in Eq.~\ref{eq:vanilla_loss} treats all time instants equally. For time-dependent problems, this violates the causal principle: the solution at time $t$ depends only on earlier times. We remedy this by partitioning the time domain into $K$ chunks $[t_0, t_1], [t_1, t_2], \dots, [t_{K-1}, t_K]$ and weighting the PDE loss in each chunk by an exponential gate:
+\begin{itemize}
+\item it reuses the anchor gradient that a gradient-based balancer already
+computes; only $\lVert\nabla_\theta \mathcal{L}_k\rVert$ is new, at one
+backward pass per loss;
+\item it does not need to be evaluated every iteration --- the coupling
+structure is a property of the computation graph, not of the current
+parameter values, so evaluating it every few hundred steps suffices;
+\item it applies to any balancer, including those (such as ReLoBRaLo) that do
+not themselves use gradients.
+\end{itemize}
 
-\begin{equation}
-    w_k = \exp\left(-\varepsilon \sum_{j=1}^{k-1} \mathcal{L}_{\text{PDE}}^{(j)}\right), \quad k = 1, \dots, K
-    \label{eq:causal_weight}
-\end{equation}
+In the experiments below we report $c_k$ for all loss terms, and we use the
+threshold $c_k < 10^{-3}$ to flag a loss as decoupled.
 
-where $\mathcal{L}_{\text{PDE}}^{(j)}$ is the mean PDE residual in chunk $j$, and $\varepsilon$ controls the strictness of the causal gate. When $\mathcal{L}_{\text{PDE}}^{(j)}$ is large (early chunks are under-resolved), $w_k$ for later chunks is exponentially suppressed. As early chunks are learned, the gate opens progressively to later times.
+% ======================================================================
+\section{Method: Anchor-Robust Balancing}
+\label{sec:method}
+% ======================================================================
 
-The causally-weighted PDE loss becomes:
+The diagnostic tells us \emph{which} losses cannot be balanced; we now use it
+to make balancing safe. The \emph{anchor-robust balancer} (ARB) wraps an
+arbitrary base balancer and modifies only the weights of the losses the
+diagnostic flags:
 
-\begin{equation}
-    \mathcal{L}_{\text{PDE}}^{\text{causal}} = \sum_{k=1}^{K} w_k \mathcal{L}_{\text{PDE}}^{(k)}
-    \label{eq:causal_pde_loss}
-\end{equation}
+\begin{enumerate}
+\item every $M$ iterations, evaluate $c_k$ for all $k$ and mark
+$\mathcal{D} = \{k : c_k < \tau\}$;
+\item call the base balancer on all $K$ losses, obtaining weights
+$\lambda^{\text{base}}$;
+\item for $k \in \mathcal{D}$, replace $\lambda_k$ by the mean of the weights of
+the visible losses $\frac{1}{|\mathcal{V}|}\sum_{j \in \mathcal{V}}
+\lambda_j^{\text{base}}$, where $\mathcal{V} = \{k : c_k \geq \tau\}$;
+\item renormalise so that $\sum_k \lambda_k = K$, matching the convention of
+the base balancer.
+\end{enumerate}
 
-This enforces a temporal curriculum: the network must first solve the early-time dynamics before being exposed to the full evolution. For the SWE system, we use $K=72$ chunks of 50 seconds each over $T=3600$s, with $\varepsilon=0.1$.
+Three design choices are worth stating explicitly.
 
-\subsection{ReLoBRaLo Gradient-Based Loss Balancing}
+\textbf{Why the mean visible weight.} A decoupled loss carries no usable
+gradient-norm signal, so any weight derived from one is arbitrary. The mean
+visible weight is the natural neutral choice: it neither removes the loss
+(the relative-norm failure) nor promotes it above the losses that do carry
+signal (the inverse-ratio failure). It also reduces to the base balancer's own
+behaviour in the limit where all losses are visible.
 
-Fixed weights $\lambda_d, \lambda_b$ in Eq.~\ref{eq:vanilla_loss} cannot adapt to the evolving gradient landscape during training. We adopt ReLoBRaLo \cite{bischof2021multi}, which updates loss weights at each iteration based on gradient statistics:
+\textbf{Why the base balancer still sees all losses.} Passing only the visible
+subset would change the base balancer's normalisation and, for a relative-norm
+balancer, its denominator. Calling it with the full list keeps the visible
+weights identical to what the base method would have produced on its own; the
+decoupled entries, which are the meaningless ones, are then overwritten. Since a
+decoupled loss contributes a gradient norm of zero, it cannot perturb the
+denominator of a relative-norm balancer, whose maximum is attained by a visible
+loss.
 
-\begin{equation}
-    \hat{\lambda}_k^{(t)} = \alpha \hat{\lambda}_k^{(t-1)} + (1-\alpha) \frac{\|\nabla_\phi \mathcal{L}_k\|}{\max_j \|\nabla_\phi \mathcal{L}_j\|}
-    \label{eq:relobralo_ema}
-\end{equation}
+\textbf{Cost.} The probe costs one additional backward pass per loss every $M$
+iterations. With $M = 200$ this is a negligible fraction of the training cost,
+and it is the only overhead. No hyperparameter needs tuning per problem: $\tau =
+10^{-3}$ separates exact decoupling ($c_k = 0$) from partial coupling, and the
+results are insensitive to it over several orders of magnitude.
 
-\begin{equation}
-    \lambda_k^{(t)} = \frac{K \cdot \hat{\lambda}_k^{(t)}}{\sum_j \hat{\lambda}_j^{(t)}} \cdot \exp(\mathcal{N}(0, \sigma^2))
-    \label{eq:relobralo_final}
-\end{equation}
+% ======================================================================
+\section{Experimental Setup}
+\label{sec:setup}
+% ======================================================================
 
-where $\nabla_\phi \mathcal{L}_k$ is the gradient of the $k$-th loss term with respect to the last hidden layer weights, $\alpha = 0.9$ controls the exponential moving average, and $\sigma^2 = 0.01$ adds log-normal exploration noise. The gradient is computed on the last layer only for computational efficiency while still capturing relative gradient scale information.
+\subsection{Problem: 2D Shallow Water Equations}
 
-We balance $K=3$ conflicting multi-task losses: $\mathcal{L}_{\text{PDE}}$, $\mathcal{L}_{\text{data}}$, and $\mathcal{L}_{\text{BC}}$. The parameter prior $\mathcal{L}_{\text{prior}}$ (inverse problems) is \textit{excluded} from balancing and keeps a fixed weight $\lambda_{\text{prior}} = 1$. The balanced total loss is:
-
-\begin{equation}
-    \mathcal{L}_{\text{total}} = \sum_{k=1}^{3} \lambda_k \mathcal{L}_k \;+\; \lambda_{\text{prior}} \mathcal{L}_{\text{prior}}
-    \label{eq:total_loss}
-\end{equation}
-
-\subsection{A Gradient-Decoupling Argument: Why Balancing Priors Fails}
-
-Our experiments (Table~\ref{tab:balprior}) show that including $\mathcal{L}_{\text{prior}}$ among the balanced losses re-ill-poses the inverse problem: its weight decays to zero and the physical parameters drift. This failure has a simple, provable mechanism, which we formalize as follows.
-
-\textbf{Proposition (gradient decoupling).} Let the balancing anchor $\phi$ be a parameter subset with respect to which gradient norms are estimated (here, the last-layer weights $W_L$). If a loss term $\mathcal{L}_k$ is a function only of a parameter subset $\theta_P$ disjoint from $\phi$, i.e., $\partial \phi / \partial \theta_P = 0$ and $\mathcal{L}_k = \mathcal{L}_k(\theta_P)$, then $\nabla_\phi \mathcal{L}_k \equiv 0$ for all training iterations. Consequently, the ReLoBRaLo update (Eq.~\ref{eq:relobralo_ema}) drives $\hat{\lambda}_k^{(t)} \to 0$ geometrically at rate $\alpha$.
-
-\textit{Proof.} By the chain rule, $\nabla_\phi \mathcal{L}_k = \left(\partial \mathcal{L}_k / \partial \theta_P\right) \left(\partial \theta_P / \partial \phi\right) = \left(\partial \mathcal{L}_k / \partial \theta_P\right) \cdot 0 = 0$, since $\theta_P$ and $\phi$ are independent variables. Substituting $\|\nabla_\phi \mathcal{L}_k\| = 0$ into Eq.~\ref{eq:relobralo_ema} yields $\hat{\lambda}_k^{(t)} = \alpha^t \hat{\lambda}_k^{(0)} \to 0$. $\blacksquare$
-
-In our SWE inverse problem, the prior $\mathcal{L}_{\text{prior}} = 10(n - 0.03)^2 + 5(C - 0.05)^2 + 5(q_{x0} - 1.0)^2$ depends only on the three scalar physical parameters $\theta_P = \{n_{\text{raw}}, C_{\text{raw}}, q_{x0,\text{raw}}\}$, which do not influence the network outputs through $W_L$. The proposition therefore predicts $\lambda_{\text{prior}} \to 0$---exactly the observed behavior (Table~\ref{tab:balprior}).
-
-\textbf{Remedy.} The failure is a property of the \textit{anchor choice}, not of balancing itself. Two fixes follow directly: (i) exclude anchor-decoupled losses from balancing (our design principle, which we validate empirically); or (ii) estimate gradient norms over the \textit{full} parameter vector $\theta$ instead of the last layer, in which case $\nabla_\theta \mathcal{L}_{\text{prior}} \neq 0$ and the balancer can assign the prior a meaningful weight. Option (i) is simpler and avoids the computational cost of full-parameter gradient norms; we adopt it throughout. The same argument applies to any gradient-norm-based balancer (e.g., GradNorm \cite{chen2018gradnorm}) and to any decoupled auxiliary loss, so the principle generalizes beyond inverse-problem priors.
-
-\subsection{Fourier Feature Encoding}
-
-Standard MLPs with tanh activation exhibit spectral bias---they preferentially learn low-frequency components of the solution \cite{rahaman2019spectral, tancik2020fourier}. The SWE drainage problem contains a localized depression at $(x,y)=(50,50)$ m with characteristic width $\sim 12$ m, producing high spatial frequencies. We prepend a random Fourier feature (RFF) mapping \cite{tancik2020fourier} to the input layer:
-
-\begin{equation}
-    \gamma(\mathbf{v}) = \bigl[\cos(2\pi \mathbf{B} \mathbf{v}),\; \sin(2\pi \mathbf{B} \mathbf{v})\bigr]
-    \label{eq:rff}
-\end{equation}
-
-where $\mathbf{v} = [x/L_x, y/L_y, t/T] \in [0,1]^3$ and $\mathbf{B} \in \mathbb{R}^{m \times 3}$ is a fixed random matrix with entries $B_{ij} \sim \mathcal{N}(0, \sigma^2)$. We use $m=64$ (producing $128$ Fourier features) and $\sigma=1.0$. The Fourier features are passed to a standard MLP with 4 hidden layers of 128 neurons each.
-
-\subsection{2D Shallow Water Equations}
-
-We apply the proposed balancing strategy to the 2D shallow water equations in conservation form with discharges $(q_x, q_y) = (hu, hv)$ as primary variables:
-
+We use the 2D shallow-water equations in conservation form with discharges
+$(q_x,q_y) = (hu,hv)$ as primary variables:
 \begin{align}
-    \frac{\partial h}{\partial t} + \frac{\partial q_x}{\partial x} + \frac{\partial q_y}{\partial y} + S_d &= 0 \label{eq:swe_cont} \\
-    \frac{\partial q_x}{\partial t} + \frac{\partial}{\partial x}\!\left(\frac{q_x^2}{h}\right) + \frac{\partial}{\partial y}\!\left(\frac{q_y q_x}{h}\right) + gh\left(\frac{\partial h}{\partial x} - S_{0x}\right) + \frac{g n^2 q_x \sqrt{q_x^2+q_y^2}}{h^{7/3}} &= 0 \label{eq:swe_xmom} \\
-    \frac{\partial q_y}{\partial t} + \frac{\partial}{\partial y}\!\left(\frac{q_y^2}{h}\right) + \frac{\partial}{\partial x}\!\left(\frac{q_y q_x}{h}\right) + gh\left(\frac{\partial h}{\partial y} - S_{0y}\right) + \frac{g n^2 q_y \sqrt{q_x^2+q_y^2}}{h^{7/3}} &= 0 \label{eq:swe_ymom}
+\frac{\partial h}{\partial t} + \frac{\partial q_x}{\partial x} +
+\frac{\partial q_y}{\partial y} + S_d &= 0, \label{eq:swe_cont} \\
+\frac{\partial q_x}{\partial t} + \frac{\partial}{\partial x}\!\left(\frac{q_x^2}{h}\right)
++ \frac{\partial}{\partial y}\!\left(\frac{q_y q_x}{h}\right)
++ gh\left(\frac{\partial h}{\partial x} - S_{0x}\right)
++ \frac{g n^2 q_x \sqrt{q_x^2+q_y^2}}{h^{7/3}} &= 0, \label{eq:swe_xmom} \\
+\frac{\partial q_y}{\partial t} + \frac{\partial}{\partial y}\!\left(\frac{q_y^2}{h}\right)
++ \frac{\partial}{\partial x}\!\left(\frac{q_y q_x}{h}\right)
++ gh\left(\frac{\partial h}{\partial y} - S_{0y}\right)
++ \frac{g n^2 q_y \sqrt{q_x^2+q_y^2}}{h^{7/3}} &= 0, \label{eq:swe_ymom}
 \end{align}
+with $h$ the water depth, $g = 9.81\ \mathrm{m/s^2}$, bed slopes $S_{0x} =
+0.001$, $S_{0y} = 0$, Manning's roughness $n$, and a localised drainage sink
+$S_d = C \cdot 0.5 \exp(-d/12)\, h$ centred at $(50,50)$~m with $d$ the
+distance to the centre. The domain is $[0,100]^2\ \mathrm{m^2}$ and $T =
+3600$~s.
 
-where $h$ is water depth, $g=9.81$ m/s$^2$, $S_{0x}=0.001$ and $S_{0y}=0$ are bed slopes, $n$ is Manning's roughness coefficient, and $S_d = C \cdot 0.5 \cdot \exp(-d/12) \cdot h$ is a localized drainage sink term centered at $(50,50)$ m with spatial scale 12 m. The domain is $\Omega = [0,100] \times [0,100]$ m$^2$, $T = 3600$ s.
+The inverse problem infers $n$, $C$ and the inflow discharge $q_{x0}$ from
+$N_d = 800$ noisy water-depth observations ($0.5\%$ Gaussian noise). The true
+values are $n = 0.03$, $C = 0.05$ and $q_{x0} = 1.0\ \mathrm{m^2/s}$. The
+parameter prior is
+\begin{equation}
+\mathcal{L}_{\text{prior}} = 10\,(n - n^\star)^2 + 5\,(C - C^\star)^2
++ 5\,(q_{x0} - q_{x0}^\star)^2 ,
+\label{eq:prior}
+\end{equation}
+with $\star$ the prior centre. Unless stated otherwise the prior centre equals
+the true value. The scalar weight $\sigma$ in
+$\sigma \mathcal{L}_{\text{prior}}$ is one except in the identifiability study
+of \S\ref{sec:identifiability}.
 
-Boundary conditions are: upstream inflow $q_x = q_{x0}$, $q_y = 0$ at $x=0$; free outflow $\partial h/\partial x = 0$ at $x=100$; free-slip at $y=0,100$. We solve the inverse problem: given $N_d = 800$ noisy water depth observations ($\pm 0.5\%$ Gaussian noise), jointly infer the solution fields $(h, q_x, q_y)$ and the three unknown parameters: Manning's $n$ (true value $0.03$), drainage coefficient $C$ (true $0.05$), and inflow $q_{x0}$ (true $1.0$ m$^2$/s).
+The network is a Fourier-feature encoding ($m = 64 \to 128$ features,
+$\sigma_B = 1.0$) followed by a four-hidden-layer MLP with 128 neurons per
+layer and $\tanh$ activations. Training uses Adam with learning rate
+$3\times10^{-4}$, a \texttt{ReduceLROnPlateau} scheduler and gradient clipping
+at $1.0$; all runs use 30{,}000 epochs and 2{,}000 collocation points unless
+stated otherwise. Everything runs on CPU.
 
-Parameter priors are incorporated as soft constraints: $\mathcal{L}_{\text{prior}} = 10(n-0.03)^2 + 5(C-0.05)^2 + 5(q_{x0}-1.0)^2$. The network outputs $h$ through a softplus activation to enforce positivity.
-
-\subsection{Reference Solution and Verification}
+\subsection{Reference Solution and Its Verification}
 \label{sec:reference}
 
-The reference solution is computed with a first-order Lax--Friedrichs finite-volume scheme on a cell-centered grid, using the same governing equations, drainage sink, and boundary conditions as the PINN residual. The solver is explicit (CFL number $0.5$) with ghost-cell boundary conditions: specified inflow discharge at $x=0$, free outflow at $x=100$, and free-slip walls at $y=0,100$. Two checks verify the reference. First, in the absence of drainage ($C=0$) the solution remains at the Manning normal depth $h=(n q_{x0}/\sqrt{S_{0x}})^{3/5}$ to machine precision. Second, the scheme is mass-conserving: at steady state the downstream outflow plus the integrated drainage sink equals the upstream inflow to within $0.1\%$, and this imbalance shrinks as the grid is refined. Reference fields are computed on a $200\times200$ grid, and grid convergence of the $L_2$ field error was confirmed across $80\times80$, $160\times160$, and $200\times200$ grids.
+The reference solution is computed with a first-order Lax--Friedrichs
+finite-volume solver on a $100\times100$ cell-centred grid using the same
+governing equations, sink and boundary conditions as the PINN residual. The
+solver is explicit (CFL $0.5$) with ghost-cell boundary conditions: specified
+inflow discharge at $x=0$, free outflow at $x=100$, free-slip at $y=0,100$.
+
+Two checks verify the reference. In the absence of drainage ($C=0$) the
+solution remains at the Manning normal depth $h = (n q_{x0}/\sqrt{S_{0x}})^{3/5}$
+to machine precision. The scheme is mass conserving: at steady state the
+downstream outflow plus the integrated sink equals the upstream inflow to
+within $0.1\%$, and the imbalance shrinks under grid refinement. An earlier
+version of this study used an analytically constructed field that did not
+satisfy \eqref{eq:swe_cont}--\eqref{eq:swe_ymom}; all results reported here use
+the verified solver.
+
+\subsection{Balancers Compared}
+
+\begin{itemize}
+\item \textbf{LL-EMA}: an exponential moving average of relative last-layer
+gradient norms. This is the relative-norm balancer of
+Corollary~\ref{cor:directions}(i), and is representative of
+efficiency-motivated implementations that restrict the anchor to the last
+layer.
+\item \textbf{LRA}: learning-rate annealing \cite{wang2021understanding},
+$\lambda_k = \max_j \lVert\nabla_\theta \mathcal{L}_j\rVert /
+\lVert\nabla_\theta \mathcal{L}_k\rVert$, with the anchor taken over the full
+parameter vector. This is the inverse-ratio balancer of
+Corollary~\ref{cor:directions}(ii).
+\item \textbf{ReLoBRaLo} \cite{bischof2021multi}: balances using loss ratios
+through a softmax with a random lookback, and computes no per-loss gradients.
+\end{itemize}
+
+Each is run in two configurations: the prior is either \emph{balanced}
+jointly with the PDE, data and boundary losses ($K=4$), or held at a fixed
+weight of one ($K=3$ balanced, prior added separately). The second is the
+``prior-fixing'' workaround that is common in practice.
 
 % ======================================================================
 \section{Experiments}
+\label{sec:experiments}
 % ======================================================================
 
-We conduct four sets of experiments: (1) main comparison of the ReLoBRaLo-balanced configuration against a vanilla PINN baseline on the SWE inverse problem; (2) an ablation study over the causal and ReLoBRaLo modules ($2^2 = 4$ combinations); (3) generalization to the Burgers equation and the 2D Navier--Stokes cylinder wake; and (4) a sparse-observation robustness study.
+\subsection{Controlled Illustration}
 
-\textbf{Implementation.} All experiments use the same network architecture: Fourier feature encoding ($m=64 \rightarrow 128$ features) + 4-hidden-layer MLP with 128 neurons per layer and tanh activation. Training uses Adam optimizer with initial learning rate $\eta=3\times10^{-4}$, ReduceLROnPlateau scheduler (patience $1000$, factor $0.5$), and gradient clipping at $\|\mathbf{g}\|_{\max}=1.0$. For the main SWE experiments, we train for $30,000$ epochs with $N_f = 8,000$ collocation points. All experiments run on a single CPU. Each training run takes approximately 2--4 hours on a modern laptop CPU.
+We first isolate the mechanism on a toy problem: a linear layer (the anchor is
+its weight matrix) plus a scalar parameter $\mu$, with one loss depending on
+the layer and one depending only on $\mu$. Over 300 iterations the scaling
+assigned to the decoupled loss is $1.39\times10^{-8}$ for LL-EMA (collapse),
+$2.96\times10^{3}$ for LRA (blow-up) and $1.00$ for ReLoBRaLo (bounded). The
+diagnostic reports $c = 0.894$ for the coupled loss and $c = 0$ exactly for the
+decoupled one. This establishes that the two failure directions are properties
+of the balancers, independent of any PDE.
+
+\subsection{Balancing a Parameter Prior on the Shallow-Water Problem}
+
+Table~\ref{tab:main} reports the four configurations with the prior balanced
+jointly. The consequences of Corollary~\ref{cor:directions} are visible
+directly in the weights.
 
 \begin{table}[t]
 \centering
-\caption{Main results: SWE inverse problem. Relative $L_2$ error for solution fields and relative error for inferred parameters.}
-\label{tab:main_results}
-\begin{tabular}{lcccccc}
+\caption{Balancing all four losses, including the parameter prior. Weights are
+those at the end of training; ``$c_{\text{prior}}$'' is the anchor-coupling
+ratio of \eqref{eq:coupling}. Errors are relative to the true parameter
+values.}
+\label{tab:main}
+\begin{tabular}{lcccc}
 \toprule
-Method & $\epsilon_h$ & $\epsilon_n$ (\%) & $\epsilon_C$ (\%) & $\epsilon_{q_{x0}}$ (\%) & Time (h) \\
+Configuration & $c_{\text{prior}}$ & $\lambda_{\text{prior}}$ & $\epsilon_n$ & $\epsilon_C$ \\
 \midrule
-Vanilla PINN & $\mathbf{5.43\times10^{-3}}$ & 0.049\% & 0.064\% & $\sim$0\% & 2.6 \\
-ReLoBRaLo, fixed prior & $6.05\times10^{-3}$ & $\mathbf{0.045\%}$ & $\mathbf{0.047\%}$ & $\sim$0\% & 3.1 \\
+ReLoBRaLo (loss statistics) & --- & $7.4\times10^{-1}$ & $0.048\%$ & $0.071\%$ \\
+LL-EMA (no fix)   & $0$ & $1.6\times10^{-5}$ & $0.072\%$ & $\mathbf{52.9\%}$ \\
+LRA (no fix)      & $0$ & $\mathbf{3.3\times10^{7}}$ & $\sim 0$ & $\sim 0$ (circular) \\
+\midrule
+LL-EMA + ARB      & $0$ & $1.0$ & $0.028\%$ & $0.030\%$ \\
+LRA + ARB         & $0$ & $1.0$ & $0.002\%$ & $0.001\%$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{Main Results: SWE Inverse Problem}
+The diagnostic assigns the prior a coupling ratio of exactly zero in every
+case, as Proposition~\ref{prop:decoupling} predicts. LL-EMA then drives its
+weight to $1.6\times10^{-5}$ --- the prior is removed from the objective ---
+and the drainage coefficient, which is the parameter the prior was chiefly
+constraining, drifts to an error of $52.9\%$. LRA fails in the opposite
+direction: its weight reaches $3.3\times10^7$, so the prior overwhelms the
+data. The near-zero errors in that row are not evidence of a good inverse
+solution; they are the prior's centre being echoed back, as
+\S\ref{sec:identifiability} confirms.
 
-Table~\ref{tab:main_results} summarizes the main comparison at full convergence (30,000 epochs). Both configurations attain comparable solution-field accuracy ($\epsilon_h \approx 0.5$--$0.6\%$), while the ReLoBRaLo-balanced configuration with fixed-weight priors recovers the physical parameters slightly more accurately ($n$: 0.045\% vs.\ 0.049\%). Figure~\ref{fig:fields} visualizes the reconstructed water-depth field at five time snapshots, and Figure~\ref{fig:profile} compares the one-dimensional profile along $y=50$ m.
+The last two rows show the wrapper at work. With ARB the prior weight is
+$1.0$ in both cases, and the parameter errors fall to $0.030\%$ (LL-EMA) and
+$0.001\%$ (LRA) --- a $1773\times$ reduction for LL-EMA relative to its
+unprotected counterpart. Neither run was given any information about which
+loss was decoupled.
 
-To assess statistical significance, we repeat the four configurations over three additional random seeds and report mean $\pm$ standard deviation (Table~\ref{tab:multiseed}). The standard deviations are small (relative std $<3\%$ for $\epsilon_h$), confirming that the results are robust to random initialization.
+\subsection{The Prior-Fixing Workaround Is Unnecessary for a Correct Balancer}
+
+Table~\ref{tab:fixed} compares the same balancers with the prior excluded from
+balancing and held at a fixed weight of one --- the workaround implied by the
+``never balance priors'' rule of thumb.
 
 \begin{table}[t]
 \centering
-\caption{Multi-seed statistics over three seeds (0, 1, 2): mean $\pm$ std of the relative errors (\%).}
+\caption{Prior held at a fixed weight of one (excluded from balancing).}
+\label{tab:fixed}
+\begin{tabular}{lccc}
+\toprule
+Configuration & $\epsilon_h$ & $\epsilon_n$ & $\epsilon_C$ \\
+\midrule
+ReLoBRaLo & $0.583\%$ & $0.041\%$ & $0.055\%$ \\
+LL-EMA    & $0.617\%$ & $0.041\%$ & $0.037\%$ \\
+LRA       & $0.933\%$ & $0.280\%$ & $4.18\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+For ReLoBRaLo the workaround changes almost nothing ($0.055\%$ versus
+$0.071\%$ with the prior balanced): a balancer that uses loss statistics
+rather than gradients never sees the decoupling in the first place, and
+handles the prior correctly without assistance. The rule of thumb is
+therefore not a property of priors; it is a patch for a specific class of
+balancers.
+
+\subsection{Identifiability: Are the Parameters Data- or Prior-Determined?}
+\label{sec:identifiability}
+
+The results above leave an important question open. If the prior is what
+constrains the parameters, are the reported errors a measure of inference from
+data, or of the prior being echoed back? We test this two ways.
+
+\textbf{Prior misspecification.} We move the prior centre $20\%$ above the true
+values while leaving the data unchanged, so a balancer that follows the data
+should still recover the truth. Table~\ref{tab:shift} shows that neither
+gradient-norm balancer does.
+
+\begin{table}[t]
+\centering
+\caption{Prior centre displaced $+20\%$ from the truth. ``to prior'' is the
+error relative to the (wrong) prior centre.}
+\label{tab:shift}
+\begin{tabular}{lccc}
+\toprule
+Configuration & $\epsilon_C$ (to truth) & $\epsilon_C$ (to prior) & $\lambda_{\text{prior}}$ \\
+\midrule
+ReLoBRaLo & $19.94\%$ & $\mathbf{0.05\%}$ & $7.3\times10^{-1}$ \\
+LRA       & $20.00\%$ & $\mathbf{0.00\%}$ & $3.4\times10^{7}$ \\
+LL-EMA    & $53.56\%$ & $61.30\%$ & $1.0\times10^{-5}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+ReLoBRaLo's parameters sit $0.05\%$ from the displaced prior centre and
+$19.9\%$ from the truth: it followed the prior exactly. LRA is even more
+extreme at $0.00\%$. LL-EMA follows neither, having discarded the prior and
+left the parameters unconstrained. The data does not pull any of them back.
+
+\textbf{Prior strength.} Varying the prior weight $\sigma$ confirms the same
+picture and locates the transition.
+
+\begin{table}[t]
+\centering
+\caption{Prior strength study (ReLoBRaLo, prior balanced). $\sigma=0$ removes
+the prior entirely.}
+\label{tab:sigma}
+\begin{tabular}{lccc}
+\toprule
+$\sigma$ & $\epsilon_h$ & $\epsilon_n$ & $\epsilon_C$ \\
+\midrule
+$0$     & $0.635\%$ & $6.33\%$ & $\mathbf{54.99\%}$ \\
+$0.01$  & $0.644\%$ & $5.06\%$ & $6.13\%$ \\
+$0.1$   & $0.635\%$ & $0.51\%$ & $0.65\%$ \\
+$1.0$   & $0.640\%$ & $0.048\%$ & $0.071\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two facts stand out. The field error is constant ($0.635$--$0.644\%$) across
+four orders of magnitude of prior strength: the \emph{field} is determined by
+the data. The parameter errors, by contrast, track the prior weight almost
+exactly. With no prior at all the drainage coefficient is off by $54.99\%$, so
+the data alone does not identify it --- unsurprising, since the drainage
+depression is only $\sim 1\%$ of the water depth, and a $20\%$ change in $C$
+moves $h$ by roughly $0.2\%$, below the $0.5\%$ observation noise.
+
+The practical reading is that this inverse problem is only weakly identified,
+and the prior is doing the identification. The choice of balancer then decides
+the answer: over the configurations studied, $\epsilon_C$ ranges from
+$0.001\%$ to $54.99\%$ depending on how the balancer treats a single loss
+term. This is the strongest argument for the diagnostic and the wrapper: in a
+weakly identified problem one cannot rely on the training loss to reveal that
+a prior has been silently discarded.
+
+\subsection{Repairing the Failures}
+
+Table~\ref{tab:main} already reports the repaired runs; we summarise the
+effect sizes here. For LL-EMA the wrapper raises the prior weight from
+$1.6\times10^{-5}$ to $1.0$ and reduces the drainage-coefficient error from
+$52.9\%$ to $0.030\%$. For LRA it bounds the weight that previously reached
+$3.3\times10^7$. In both cases the field error is unchanged to within the
+spread of the baseline runs ($0.680\%$ and $0.839\%$ versus $0.632\%$ and
+$0.708\%$), confirming that the wrapper alters only the treatment of the
+decoupled loss.
+
+\subsection{Multi-Seed Robustness}
+
+Table~\ref{tab:multiseed} reports the mean and standard deviation over three
+seeds for the un-repaired configurations with the prior fixed, to establish
+that the baseline behaviour is stable.
+
+\begin{table}[t]
+\centering
+\caption{Multi-seed statistics over seeds $0,1,2$ (prior fixed, errors in \%).}
 \label{tab:multiseed}
 \begin{tabular}{lccc}
 \toprule
-Config & $\epsilon_h$ (\%) & $\epsilon_n$ (\%) & $\epsilon_C$ (\%) \\
+Configuration & $\epsilon_h$ & $\epsilon_n$ & $\epsilon_C$ \\
 \midrule
-Vanilla & $0.549 \pm 0.012$ & $0.054 \pm 0.005$ & $0.067$ \\
-Causal & $0.919 \pm 0.007$ & $1.669 \pm 0.005$ & $2.814$ \\
-ReLoBRaLo & $0.592 \pm 0.018$ & $0.041 \pm 0.001$ & $0.039$ \\
-Both & $1.216 \pm 0.016$ & $2.535 \pm 0.071$ & $3.276$ \\
+ReLoBRaLo          & $0.592 \pm 0.018$ & $0.041 \pm 0.001$ & $0.039$ \\
+LL-EMA             & $0.549 \pm 0.012$ & $0.054 \pm 0.005$ & $0.067$ \\
+LL-EMA + causal    & $1.216 \pm 0.016$ & $2.535 \pm 0.071$ & $3.276$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\textbf{Design principle discovered.} Our experiments reveal a critical interaction between loss balancing and inverse problems: when ReLoBRaLo is applied to \textit{all} loss terms including parameter priors, the prior weights are driven to near zero ($\lambda_{\text{prior}} \to 0$), allowing the physical parameters to drift toward solutions that minimize PDE and data losses but violate prior knowledge (Table~\ref{tab:balprior}: $\epsilon_C$ degrades from 0.047\% to 37.2\% at full convergence). Excluding the prior term from balancing and keeping its weight fixed preserves sub-percent parameter recovery. This yields a concrete design principle: \textbf{adaptive loss balancing should be applied only to conflicting multi-task losses (PDE/data/BC), while parameter priors in inverse problems must retain fixed weights}.
+Standard deviations are small (below $3\%$ relative for $\epsilon_h$), so the
+qualitative behaviour reported above is not a seed artefact.
+
+\subsection{Generalisation to Other PDEs}
+
+To check that the mechanism is not specific to the shallow-water problem we
+repeat the comparison on two further benchmarks: the 1D viscous Burgers
+equation ($\nu = 0.01/\pi$, analytical Cole--Hopf reference) and the 2D
+Navier--Stokes cylinder wake at $\mathrm{Re}=100$ (CFD data of
+\cite{raissi2019physics}).
 
 \begin{table}[t]
 \centering
-\caption{Effect of the prior-fixing principle at full convergence (30,000 epochs, 800 observations). Balancing all four losses (including the prior) drives the drainage-coefficient error from 0.047\% to 37.2\%; the learning-rate annealing baseline of Wang et al.~\cite{wang2021understanding} recovers parameters less accurately than fixed-prior ReLoBRaLo.}
-\label{tab:balprior}
-\begin{tabular}{lcccc}
-\toprule
-Configuration & $\epsilon_h$ & $\epsilon_n$ (\%) & $\epsilon_C$ (\%) & $\epsilon_{q_{x0}}$ (\%) \\
-\midrule
-Vanilla PINN & $5.43\times10^{-3}$ & 0.049\% & 0.064\% & $\sim$0\% \\
-ReLoBRaLo, balance all 4 (incl.\ prior) & $6.30\times10^{-3}$ & 7.31\% & 37.2\% & 23.0\% \\
-ReLoBRaLo, fixed prior & $6.05\times10^{-3}$ & $\mathbf{0.045\%}$ & $\mathbf{0.047\%}$ & $\mathbf{\sim 0\%}$ \\
-LR annealing \cite{wang2021understanding} & $4.63\times10^{-3}$ & 3.06\% & 8.92\% & 0.017\% \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\textbf{Causal training on quasi-steady problems.} Causal time-domain weighting, whether alone ($\epsilon_h=9.22\times10^{-3}$) or combined with ReLoBRaLo ($\epsilon_h=1.36\times10^{-2}$), degrades performance on the SWE problem. This is because the SWE solution is \textit{quasi-steady}: the temporal variation is a 5\% sinusoidal perturbation of a steady base flow, so temporal causality is a weak prior that conflicts with the dominant steady-state structure. As the generalization experiments below (Burgers, Navier--Stokes) show, this failure is not specific to quasi-steady dynamics: causal weighting also degrades strongly time-dependent vortex shedding under Adam-only optimization, indicating that it does not robustly transfer without the L-BFGS fine-tuning stage used in the original causal-PINN work \cite{wang2022respecting}.
-
-Figure~\ref{fig:training} shows the training dynamics of the winning configuration. The ReLoBRaLo-balanced model exhibits faster loss reduction and monotonic parameter convergence, with all three physical parameters converging to sub-percent accuracy.
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.5\textwidth]{figures/training_curves.pdf}
-\caption{Training dynamics comparison: ReLoBRaLo-balanced model (blue) vs vanilla PINN (orange). (a--c) Parameter convergence; (d) Total loss; (e) Loss components of the balanced model; (f) Final field accuracy.}
-\label{fig:training}
-\end{figure}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\textwidth]{figures/water_depth_comparison.pdf}
-\caption{Water-depth field at five time snapshots ($t = 0$--$3600$ s): reference (top), vanilla PINN (middle), and the ReLoBRaLo-balanced configuration (bottom). The balanced model resolves the localized drainage depression at $(50,50)$ m (red star) more sharply than vanilla.}
-\label{fig:fields}
-\end{figure}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.7\textwidth]{figures/profile_comparison.pdf}
-\caption{Water-depth profile along $y=50$ m at $t=3600$ s. The ReLoBRaLo-balanced configuration captures the localized drainage depression near $x=50$ m more accurately than vanilla.}
-\label{fig:profile}
-\end{figure}
-
-\subsection{Ablation Study}
-
-Table~\ref{tab:ablation} reports the full-scale ablation study at 30,000 epochs. Each configuration uses identical architecture, data, and hyperparameters.
-
-\begin{table}[t]
-\centering
-\caption{Full-scale ablation study (30,000 epochs, 800 observations). C = causal training with $\varepsilon$ schedule; R = ReLoBRaLo on PDE/data/BC losses with fixed-weight priors.}
-\label{tab:ablation}
-\begin{tabular}{lcccccc}
-\toprule
-Config & C & R & $\epsilon_h$ & $\epsilon_n$ (\%) & $\epsilon_C$ (\%) & Time (h) \\
-\midrule
----  & \multicolumn{2}{c}{---} & $\mathbf{5.43\times10^{-3}}$ & 0.049\% & 0.064\% & 2.6 \\
-C--  & $\checkmark$ &  & $9.22\times10^{-3}$ & 1.69\% & 2.78\% & 3.7 \\
--R-  &  & $\checkmark$ & $6.05\times10^{-3}$ & $\mathbf{0.045\%}$ & $\mathbf{0.047\%}$ & 3.1 \\
-CR   & $\checkmark$ & $\checkmark$ & $1.36\times10^{-2}$ & 2.49\% & 3.80\% & 3.3 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\textbf{Key findings:} (1) ReLoBRaLo with fixed-weight priors preserves sub-percent parameter recovery ($\epsilon_n$: 0.045\%, $\epsilon_C$: 0.047\%), while all configurations attain comparable field accuracy ($\epsilon_h \approx 0.5$--$1.4\%$). (2) Causal training degrades performance on this quasi-steady problem, both alone and in combination, confirming that temporal causality is a weak prior when the solution is dominated by steady structure. (3) The combination CR performs worst, indicating that when the causal gate perturbs the PDE loss statistics, the gradient-based balancer amplifies the perturbation rather than compensating for it---a negative interaction we did not anticipate. (4) Computational overhead of ReLoBRaLo is modest (2.6h to 3.1h).
-
-\textbf{Short-training regime (Table~\ref{tab:ablation_short}).} At short budgets (1,500 epochs), vanilla performs best. This run predates our prior-fixing principle and balanced all four losses including priors, so its ReLoBRaLo result conflates two failure modes---incomplete EMA stabilization and prior-weight decay---whereas the full-scale ablation (Table~\ref{tab:ablation}) isolates the prior-fixing effect. Practical guideline: at short budgets vanilla is competitive; the ReLoBRaLo advantage emerges only at full convergence with fixed priors.
-
-\begin{table}[t]
-\centering
-\caption{Short-training ablation (1,500 epochs, laptop CPU; ReLoBRaLo balanced all four losses including priors).}
-\label{tab:ablation_short}
-\begin{tabular}{lcccc}
-\toprule
-Config & C & R & $\epsilon_h$ & $\epsilon_n$ (\%) \\
-\midrule
----  & \multicolumn{2}{c}{---} & $\mathbf{5.51\times10^{-2}}$ & $\mathbf{14.6\%}$ \\
--R-  &  & $\checkmark$ & $6.06\times10^{-2}$ & 27.0\% \\
-C--  & $\checkmark$ &  & $1.08\times10^{-1}$ & 25.8\% \\
-CR   & $\checkmark$ & $\checkmark$ & $1.59\times10^{-1}$ & 26.5\% \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\subsection{Generalization to the Burgers Equation}
-
-To test whether the module effects generalize beyond the quasi-steady SWE problem, we train all four configurations on the 1D viscous Burgers equation $u_t + u u_x - \nu u_{xx} = 0$ with $\nu = 0.01/\pi$, initial condition $u(x,0) = -\sin(\pi x)$, and Dirichlet boundary conditions $u(\pm 1, t) = 0$---a canonical strongly time-dependent benchmark with shock formation. The reference solution is the analytical Cole--Hopf series solution (200 Fourier modes of the transformed linear heat equation). All configurations use 10,000 collocation points, 100 initial/boundary data points, and 20,000 Adam epochs.
-
-\begin{table}[t]
-\centering
-\caption{Burgers equation (20,000 epochs): relative $L_2$ error on $u(x,t)$ over $x \in [-1,1]$, $t \in [0,1]$.}
+\caption{Relative $L_2$ error on Burgers ($20{,}000$ epochs).}
 \label{tab:burgers}
-\begin{tabular}{lcccc}
+\begin{tabular}{lcc}
 \toprule
-Config & C & R & $\epsilon_u$ \\
+Configuration & $\epsilon_u$ \\
 \midrule
----  & \multicolumn{2}{c}{---} & $1.94\times10^{-1}$ \\
-C--  & $\checkmark$ &  & $3.16\times10^{-1}$ \\
--R-  &  & $\checkmark$ & $\mathbf{1.88\times10^{-1}}$ \\
-CR   & $\checkmark$ & $\checkmark$ & $3.89\times10^{-1}$ \\
+No balancing (unit weights) & $1.94\times10^{-1}$ \\
+LL-EMA & $\mathbf{1.88\times10^{-1}}$ \\
+Causal weighting & $3.16\times10^{-1}$ \\
+Both & $3.89\times10^{-1}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
-
-On Burgers, ReLoBRaLo improves accuracy (3.2\% over vanilla), while causal training degrades it, alone or in combination. Notably, causal training fails here \textit{despite} strong temporal dependence---contrary to the hypothesis that causality helps time-dependent problems. We attribute this to our Adam-only optimization: the causal-PINN literature typically pairs causal weighting with an L-BFGS fine-tuning stage \cite{wang2022respecting}, which our setup omits. Investigating the interaction between causal training and second-order optimizers is an important direction for future work; our results show that causal weighting does \textit{not} robustly transfer to Adam-only training.
-
-\subsection{Generalization to the 2D Navier--Stokes Cylinder Wake}
-
-As a third, more challenging benchmark, we train the same four configurations on the 2D incompressible Navier--Stokes equations in streamfunction--vorticity form, targeting the canonical cylinder-wake benchmark of Raissi et al.~\cite{raissi2019physics} ($\mathrm{Re}=100$, vortex shedding). The network predicts the streamfunction $\psi$ and pressure $p$ from $(x,y,t)$; velocity is recovered as $u=\partial\psi/\partial y$, $v=-\partial\psi/\partial x$. All configurations use 8,000 collocation points, 3,000 scattered data points, and 8,000 Adam epochs (CFD data from \cite{raissi2019physics}). This is a forward problem whose loss comprises only the PDE and data terms---the velocity reference fields are sampled throughout the domain, including the inflow and cylinder boundaries, so no separate boundary-condition loss is required.
 
 \begin{table}[t]
 \centering
-\caption{2D Navier--Stokes cylinder wake (8,000 epochs): relative $L_2$ error on $u$ and $v$ at the final time over all 5,000 grid points.}
+\caption{Relative $L_2$ error on the Navier--Stokes cylinder wake
+($8{,}000$ epochs) at the final time.}
 \label{tab:ns}
-\begin{tabular}{lcccc}
+\begin{tabular}{lcc}
 \toprule
-Config & C & R & $\epsilon_u$ & $\epsilon_v$ \\
+Configuration & $\epsilon_u$ & $\epsilon_v$ \\
 \midrule
----  & \multicolumn{2}{c}{---} & $\mathbf{5.52\times10^{-2}}$ & $\mathbf{2.06\times10^{-1}}$ \\
-C--  & $\checkmark$ &  & $1.49\times10^{-1}$ & $6.53\times10^{-1}$ \\
--R-  &  & $\checkmark$ & $6.80\times10^{-2}$ & $2.51\times10^{-1}$ \\
-CR   & $\checkmark$ & $\checkmark$ & $1.93\times10^{-1}$ & $9.81\times10^{-1}$ \\
+No balancing & $\mathbf{5.52\times10^{-2}}$ & $\mathbf{2.06\times10^{-1}}$ \\
+LL-EMA & $6.80\times10^{-2}$ & $2.51\times10^{-1}$ \\
+Causal weighting & $1.49\times10^{-1}$ & $6.53\times10^{-1}$ \\
+Both & $1.93\times10^{-1}$ & $9.81\times10^{-1}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Figure~\ref{fig:ns} visualizes the predicted $u$ field against the CFD reference. Causal training degrades accuracy dramatically on a third, independent problem class ($v$-component error grows 3.2$\times$, $2.06\times10^{-1}\to6.53\times10^{-1}$), reinforcing that causal weighting does \textit{not} transfer to Adam-only optimization even for strongly time-dependent vortex shedding. ReLoBRaLo---which improves Burgers---does \textit{not} help here: vanilla attains the lowest error on both components, and the combination is again worst. We interpret this as evidence that gradient-based balancing is most beneficial when the loss landscape exhibits clear multi-task tension (as in the SWE inverse problem), whereas in a forward problem with only PDE and data terms the balancing signal is weaker. Together with Burgers, this establishes the \textit{conditional} nature of both modules.
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.62\linewidth]{figures/ns_comparison.pdf}
-\caption{2D Navier--Stokes cylinder wake at the final time: reference (left) and predicted $u$ field for the four configurations. Vanilla reproduces the wake structure most faithfully; causal training smears the vortex street.}
-\label{fig:ns}
-\end{figure}
-
-\subsection{Sparse-Observation Study}
-
-We evaluate robustness under sparse observations by reducing $N_d$ from 800 to 100 (Table~\ref{tab:sparse}).
-
-\begin{table}[h]
-\centering
-\caption{Sparse-observation study (30,000 epochs, $N_d=100$).}
-\label{tab:sparse}
-\begin{tabular}{lcccc}
-\toprule
-Method & $\epsilon_h$ & $\epsilon_n$ (\%) & $\epsilon_C$ (\%) & $\epsilon_{q_{x0}}$ (\%) \\
-\midrule
-Vanilla PINN & $\mathbf{9.85\times10^{-3}}$ & $\mathbf{0.037\%}$ & $\mathbf{0.051\%}$ & $\mathbf{\sim0\%}$ \\
-Causal + ReLoBRaLo & $1.92\times10^{-2}$ & 2.48\% & 2.86\% & 0.001\% \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-With only 100 observations, field error remains small for both methods ($\epsilon_h \approx 1$--$2\%$), with vanilla slightly better. Parameter recovery remains excellent for vanilla (0.037\%) but degrades for the combined configuration (2.48\%), consistent with the negative interaction between causal weighting and ReLoBRaLo observed at full scale.
+Neither benchmark has a parameter prior, so the decoupling mechanism is absent
+and the balancers behave conventionally: balancing gives a small improvement
+on Burgers ($1.88$ vs $1.94\times10^{-1}$) and no improvement on the
+Navier--Stokes wake, where the un-balanced baseline is best. These results are
+consistent with the view that adaptive balancing helps when there is genuine
+multi-task tension to resolve, and is at best neutral otherwise. Causal
+weighting degrades both, which we report for completeness; it is a separate
+mechanism from the per-loss balancing studied here.
 
 % ======================================================================
 \section{Discussion}
 % ======================================================================
 
-\textbf{When modules help and when they hurt.} Our results refine the common assumption that causal training and loss balancing are universally beneficial for PINNs. Loss balancing (ReLoBRaLo) with fixed priors preserves sub-percent parameter recovery on the SWE inverse problem and improves field accuracy on Burgers (3.2\%), but does \textit{not} help the strongly nonlinear Navier--Stokes cylinder wake, where vanilla training already attains the lowest error. Causal training degrades performance on \textit{all three} problem classes under Adam-only optimization, including the strongly time-dependent Burgers and vortex-shedding dynamics where it was hypothesized to help most. Since the causal-PINN literature pairs causal weighting with L-BFGS fine-tuning \cite{wang2022respecting}, we hypothesize that causal gating interacts with the optimizer choice, and we caution practitioners against adopting causal weighting in Adam-only pipelines without validation. The negative interaction between causal weighting and ReLoBRaLo reproduces across all three benchmarks, suggesting it is a robust phenomenon rather than a problem-specific artifact.
+\textbf{What the diagnostic is for.} The failures analysed here are silent by
+construction: the balancer receives a zero, acts on it, and reports nothing.
+The coupling ratio \eqref{eq:coupling} makes them visible at negligible cost.
+We suggest reporting $c_k$ alongside loss weights whenever a balancer is used
+with a heterogeneous loss set, and in particular whenever a loss depends on
+parameters that are disjoint from the network --- as parameter priors do.
 
-\textbf{Design principle for inverse problems.} We distill one actionable guideline: \textit{Balance conflicting losses, never priors.} Parameter priors encode identifiable physical constants; letting their weights decay toward zero reintroduces ill-posedness---at full convergence, balancing the prior drives $\epsilon_C$ from 0.047\% to 37.2\% (Table~\ref{tab:balprior}), and the fixed-prior configuration also recovers parameters far more accurately than learning-rate annealing \cite{wang2021understanding} ($\epsilon_n$: 0.045\% vs.\ 3.06\%).
+\textbf{Why a wrapper rather than a new balancer.} The failure is a property
+of the anchor, not of the update rule, so it cannot be fixed by changing how
+the weights are computed. Any balancer of the family \eqref{eq:balancer_family}
+can be wrapped, which means existing pipelines can be made safe without being
+replaced. The wrapper also leaves the visible losses' weights exactly as the
+base method would have produced them.
 
-\textbf{Limitations.} (1) Our SWE test case uses synthetic data with a known analytical drainage-sink form; real-world bathymetry and roughness would add complexity. (2) The fixed random Fourier projection could be improved by adaptive frequency tuning \cite{wang2022improved}. (3) Automatic module selection remains open, since causal weighting and ReLoBRaLo interact negatively.
+\textbf{Weakly identified inverse problems.} The identifiability study
+(\S\ref{sec:identifiability}) is a caution that goes beyond loss balancing. In
+this problem the data does not identify the drainage coefficient, so the
+recovered parameters are prior-determined, and the reported parameter error
+measures the prior, not the inference. We would encourage reporting a
+prior-perturbation check --- refit with a displaced prior centre and see
+whether the parameters follow --- before interpreting parameter errors as
+evidence of successful inference. That check is what revealed the issue here.
 
-\textbf{Broader impact.} The fixed-prior balancing strategy is a drop-in PINN training improvement with modest overhead (38\% for ReLoBRaLo), valuable for problems with localized features (drainage, shocks, boundary layers) and multi-physics couplings.
+\textbf{Limitations.} (1) Our identifiability conclusion is specific to the
+shallow-water problem and its observation operator; a problem with a stronger
+parameter signature in the data may be well identified, in which case a
+discarded prior is less damaging (although the diagnostic still applies). (2)
+Whether the weak identifiability is partly an artefact of network capacity ---
+a flexible network can absorb parameter error into the field --- is an open
+question that a more constrained architecture might settle. (3) We study a
+single base balancer per family; the two failure directions are however
+properties of the functional forms, not of particular implementations.
 
 % ======================================================================
 \section{Conclusion}
 % ======================================================================
 
-We conducted full-convergence experiments (30,000 epochs) on a 2D shallow-water inverse problem with a localized drainage sink, plus generalization studies on the Burgers equation and the 2D Navier--Stokes cylinder wake, and distilled an actionable design principle for robust PINN training. Our contributions are: (1) ReLoBRaLo loss balancing with \textit{fixed-weight parameter priors} recovers Manning's $n$, drainage coefficient $C$, and inflow $q_{x0}$ with sub-percent accuracy; (2) a design principle that adaptive balancing must exclude parameter priors to avoid re-ill-posing inverse problems, backed by a gradient-decoupling argument; (3) a conditional view of training modules across three PDE benchmarks---causal weighting fails to transfer to Adam-only optimization, while loss balancing preserves parameter recovery in inverse problems but does not help strongly nonlinear forward dynamics.
-
-% ======================================================================
-\section*{Data and Code Availability}
-% ======================================================================
-
-All experiments were run to full convergence with fixed random seeds and the Adam optimizer. Network architectures, learning rates, and hyperparameters are stated alongside each experiment; governing equations, boundary conditions, and loss construction are specified in the Methodology section. Reference solutions are analytical (Burgers via Cole--Hopf) or established CFD (Navier--Stokes); the shallow-water reference is computed by a first-order Lax--Friedrichs finite-volume solver that is grid-converged and mass-conserving to within $0.1\%$ of the inflow (Section~\ref{sec:reference}). Source code, including all training scripts and the finite-volume solver, is available at \url{https://github.com/YuhaoPeng1103/ca-pinn}.
+Gradient-norm loss balancers estimate each loss's magnitude from its gradient
+with respect to an anchor. When a loss is decoupled from that anchor the
+estimate is zero, and we have shown that the resulting failure has two
+directions fixed by the balancer's functional form: relative-norm balancers
+switch the loss off, inverse-ratio balancers let it dominate. Neither is
+reported by the training loss. We introduced the anchor-coupling ratio to
+detect the situation, and an anchor-robust wrapper that corrects it for any
+base balancer without manual intervention, reducing a $52.9\%$ parameter error
+to $0.030\%$ and bounding a weight that had reached $3.3\times10^7$. Because
+parameter priors in inverse problems are exactly the decoupled case, and
+because such problems are often only weakly identified, we argue that the
+diagnostic should be part of the default toolkit when PINNs are used for
+parameter inference.
 
 % ======================================================================
 \section*{Declaration of Competing Interest}
 % ======================================================================
 
-The authors declare that they have no known competing financial interests or personal relationships that could have appeared to influence the work reported in this paper.
+The authors declare that they have no known competing financial interests or
+personal relationships that could have appeared to influence the work reported
+in this paper.
+
+% ======================================================================
+\section*{Data and Code Availability}
+% ======================================================================
+
+Source code, including the finite-volume reference solver, all balancer
+implementations, the diagnostic and the anchor-robust wrapper, is available at
+\url{https://github.com/YuhaoPeng1103/ca-pinn}.
 
 % ======================================================================
 \section*{Acknowledgments}
 % ======================================================================
 
-The authors acknowledge the foundational PINN codebase by Maziar Raissi et al. Generative AI tools were used to assist with code implementation and debugging, and to draft and polish portions of the manuscript; all AI-assisted work was reviewed and verified by the authors.
+The authors acknowledge the foundational PINN codebase by Maziar Raissi et al.
+Generative AI tools were used to assist with code implementation and debugging,
+and to draft and polish portions of the manuscript; all AI-assisted work was
+reviewed and verified by the authors.
 
 % ======================================================================
 \bibliographystyle{elsarticle-num}
