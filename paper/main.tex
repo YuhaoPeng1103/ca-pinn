@@ -1,4 +1,6 @@
-\documentclass[preprint,12pt]{elsarticle}
+\documentclass[a4paper,fleqn]{cas-sc}
+
+\usepackage[authoryear,longnamesfirst]{natbib}
 
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
@@ -11,28 +13,34 @@
 \usepackage{xcolor}
 \usepackage{multirow}
 \usepackage{makecell}
-\usepackage{amsthm}
 
 \newtheorem{proposition}{Proposition}
 \newtheorem{corollary}{Corollary}
-
-\journal{Neural Networks}
+\newproof{pf}{Proof}
 
 \begin{document}
+\let\WriteBookmarks\relax
+\def\floatpagepagefraction{1}
+\def\textpagefraction{.001}
 
-\begin{frontmatter}
+\shorttitle{Silent Failure of Adaptive Loss Balancing}
+\shortauthors{Y. Peng}
 
-\title{Silent Failure of Adaptive Loss Balancing in Physics-Informed
-Inverse Problems: Diagnosis and a Fix}
+\title[mode=title]{Silent Failure of Adaptive Loss Balancing in
+Physics-Informed Inverse Problems: Diagnosis and a Fix}
 
-\author[1]{Yuhao Peng\corref{cor1}}
+\author[1]{Yuhao Peng}
+\cormark[1]
 \ead{pngyuo@cug.edu.cn}
+\credit{Conceptualization, Methodology, Software, Validation, Formal
+analysis, Investigation, Data curation, Writing -- original draft,
+Writing -- review \& editing, Visualization}
 
 \affiliation[1]{organization={School of Mathematics and Physics, China University of Geosciences (Wuhan)},
             city={Wuhan},
             country={China}}
 
-\cortext[cor1]{Corresponding author}
+\cortext[1]{Corresponding author}
 
 \begin{abstract}
 Adaptive loss balancing is standard practice in physics-informed neural
@@ -67,37 +75,37 @@ problem is only weakly identified.
 \item An anchor-robust wrapper fixes both directions with no manual tuning.
 \end{highlights}
 
-\begin{keyword}
+\begin{keywords}
 Physics-informed neural networks \sep adaptive loss balancing \sep
 gradient decoupling \sep parameter identifiability \sep inverse problems \sep
 multi-task learning
-\end{keyword}
+\end{keywords}
 
-\end{frontmatter}
+\maketitle
 
 % ======================================================================
 \section{Introduction}
 \label{sec:intro}
 % ======================================================================
 
-Physics-informed neural networks (PINNs) \cite{raissi2019physics,sirignano2018dgm}
+Physics-informed neural networks (PINNs) \citep{raissi2019physics,sirignano2018dgm}
 train a network by minimising a composite objective whose terms --- PDE
 residual, data misfit, boundary and initial conditions, and, in inverse
 problems, parameter priors --- have different scales and converge at different
 rates. How to weight these terms is a long-standing practical problem, and one
 that has attracted considerable attention as physics-informed learning has
-matured \cite{karniadakis2021physics,cuomo2022scientific,blechschmidt2021three}.
+matured \citep{karniadakis2021physics,cuomo2022scientific,blechschmidt2021three}.
 A large family of methods balances the terms \emph{adaptively}, using gradient
-statistics: learning-rate annealing \cite{wang2021understanding} sets each
+statistics: learning-rate annealing \citep{wang2021understanding} sets each
 weight to the ratio of the largest gradient norm to the loss's own gradient
-norm; GradNorm \cite{chen2018gradnorm} equalises gradient magnitudes across
-tasks; PCGrad \cite{yu2020gradient} and CAGrad \cite{liu2021conflict} resolve
+norm; GradNorm \citep{chen2018gradnorm} equalises gradient magnitudes across
+tasks; PCGrad \citep{yu2020gradient} and CAGrad \citep{liu2021conflict} resolve
 gradient conflicts. A second family avoids gradients entirely and balances
-using the loss values themselves, of which ReLoBRaLo \cite{bischof2021multi},
-SoftAdapt \cite{heydari2019softadapt} and uncertainty weighting
-\cite{kendall2018multi} are representative. These techniques are shared with
+using the loss values themselves, of which ReLoBRaLo \citep{bischof2021multi},
+SoftAdapt \citep{heydari2019softadapt} and uncertainty weighting
+\citep{kendall2018multi} are representative. These techniques are shared with
 the wider multi-task learning literature
-\cite{ruder2017overview,crawshaw2020multi}.
+\citep{ruder2017overview,crawshaw2020multi}.
 
 All gradient-based balancers share a design decision that is rarely discussed:
 the \emph{anchor}, i.e.\ the parameter subset with respect to which gradient
@@ -174,35 +182,34 @@ balancer effectively decides the answer.
 
 \subsection{Physics-Informed Neural Networks}
 
-Since the formulation of Raissi et al.\ \cite{raissi2019physics}, itself
-anticipated by the deep Galerkin method \cite{sirignano2018dgm}, PINNs have
+Since the formulation of \citet{raissi2019physics}, itself
+anticipated by the deep Galerkin method \citep{sirignano2018dgm}, PINNs have
 become a widely used approach to forward and inverse problems for partial
 differential equations. The field is surveyed in
-\cite{karniadakis2021physics,cuomo2022scientific,blechschmidt2021three}, and
+\citep{karniadakis2021physics,cuomo2022scientific,blechschmidt2021three}, and
 generalisation and convergence properties have been analysed in
-\cite{shin2020pinn,mishra2022estimates}. Applications in fluid mechanics are
-reviewed in \cite{cai2021physics}, with representative studies of
+\citep{shin2020pinn,mishra2022estimates}. Applications in fluid mechanics are
+reviewed in \citep{cai2021physics}, with representative studies of
 incompressible and high-speed flows in
-\cite{jin2021nsfnets,mao2020physics}. Related operator-learning approaches
-\cite{lu2021learning,li2021fourier} share the goal of surrogate modelling but
+\citep{jin2021nsfnets,mao2020physics}. Related operator-learning approaches
+\citep{lu2021learning,li2021fourier} share the goal of surrogate modelling but
 are not the subject of this work.
 
 \subsection{Loss Balancing and Multi-task Weighting}
 
-Wang et al.\ \cite{wang2021understanding} analysed PINN training through the
-neural tangent kernel \cite{jacot2018neural} and proposed learning-rate
+\citet{wang2021understanding} analysed PINN training through the
+neural tangent kernel \citep{jacot2018neural} and proposed learning-rate
 annealing, which rescales each loss by the ratio of gradient norms and is the
 canonical inverse-ratio balancer studied here. GradNorm
-\cite{chen2018gradnorm} equalises gradient magnitudes in multi-task learning;
-PCGrad \cite{yu2020gradient} projects conflicting gradients and CAGrad
-\cite{liu2021conflict} averages them under a conflict-averse constraint.
-SoftAdapt \cite{heydari2019softadapt} and uncertainty weighting
-\cite{kendall2018multi} adapt weights from loss values. Bischof and Kraus
-\cite{bischof2021multi} proposed ReLoBRaLo (Relative Loss Balancing with Random
+\citep{chen2018gradnorm} equalises gradient magnitudes in multi-task learning;
+PCGrad \citep{yu2020gradient} projects conflicting gradients and CAGrad
+\citep{liu2021conflict} averages them under a conflict-averse constraint.
+SoftAdapt \citep{heydari2019softadapt} and uncertainty weighting
+\citep{kendall2018multi} adapt weights from loss values. \citet{bischof2021multi} proposed ReLoBRaLo (Relative Loss Balancing with Random
 Lookback), which deliberately avoids per-loss gradients: it balances using loss
 values through a softmax over loss ratios with a random lookback, and requires
 only a single backward pass. Self-adaptive variants tailored to PINNs have also
-been proposed \cite{xiang2022self,mcclenny2023self}.
+been proposed \citep{xiang2022self,mcclenny2023self}.
 
 Our work is orthogonal to the choice of balancer: we show that any of these
 methods can fail on a loss that the anchor cannot see, and our wrapper is
@@ -216,10 +223,10 @@ anchor decoupling (\S\ref{sec:experiments}).
 
 PINNs are widely used for inverse problems, where physical parameters are
 inferred jointly with the solution field
-\cite{raissi2019physics,raissi2020hidden,cai2021physics}. Identifiability is a
+\citep{raissi2019physics,raissi2020hidden,cai2021physics}. Identifiability is a
 classical concern in inverse problems
-\cite{tarantola2005inverse,stuart2010inverse}, and generalisation bounds for
-PINN inverse problems are given in \cite{mishra2022estimates}. Parameter priors
+\citep{tarantola2005inverse,stuart2010inverse}, and generalisation bounds for
+PINN inverse problems are given in \citep{mishra2022estimates}. Parameter priors
 are common, both as regularisation and as a way to encode known physics. Their
 interaction with adaptive weighting has, to our knowledge, not been studied.
 Our results show this interaction can dominate the outcome: in a weakly
@@ -229,13 +236,13 @@ parameters, which makes the balancer's treatment of the prior decisive.
 \subsection{Sampling, Architecture and Temporal Weighting}
 
 Residual-based and importance sampling strategies
-\cite{lu2021deepxde,nabian2021efficient,wu2023comprehensive} address the
+\citep{lu2021deepxde,nabian2021efficient,wu2023comprehensive} address the
 spatial distribution of collocation points, a different axis from the per-loss
 weighting studied here. Fourier feature encodings
-\cite{rahaman2019spectral,tancik2020fourier,wang2022improved} mitigate the
+\citep{rahaman2019spectral,tancik2020fourier,wang2022improved} mitigate the
 spectral bias of plain multilayer perceptrons. Causal weighting
-\cite{wang2022respecting}, motivated by the failure modes identified in
-\cite{krishnapriyan2021characterizing}, reweights the PDE residual in time so
+\citep{wang2022respecting}, motivated by the failure modes identified in
+\citep{krishnapriyan2021characterizing}, reweights the PDE residual in time so
 that early times are learned first; it is a different mechanism from per-loss
 balancing, and we include it in our comparison only because it also produces
 per-loss weights.
@@ -280,13 +287,13 @@ $\phi \cap \theta_P = \emptyset$. Then for every iteration
 \]
 \end{proposition}
 
-\begin{proof}
+\begin{pf}
 By the chain rule, $\nabla_\phi \mathcal{L}_k =
 (\partial \mathcal{L}_k/\partial \theta_P)(\partial \theta_P/\partial \phi)$.
 Since $\phi$ and $\theta_P$ are disjoint coordinates, the Jacobian
 $\partial \theta_P/\partial \phi$ is identically zero, hence
 $\nabla_\phi \mathcal{L}_k = 0$.
-\end{proof}
+\end{pf}
 
 The proposition is elementary; its consequences are not. Because every
 balancer in the family \eqref{eq:balancer_family} reads only
@@ -303,7 +310,7 @@ remaining losses have $\|\nabla_\phi \mathcal{L}_j\| > 0$:
 \end{enumerate}
 \end{corollary}
 
-\begin{proof}
+\begin{pf}
 For (i), substitute $\|\nabla_\phi \mathcal{L}_k\| = 0$ into the relative-norm
 rule; the numerator vanishes while the denominator is positive, so
 $\lambda_k = 0$ at every iteration and the exponential moving average, if any,
@@ -311,7 +318,7 @@ decays to zero as $\alpha^t \lambda_k^{(0)} \to 0$. For (ii), the same
 substitution puts $\|\nabla_\phi \mathcal{L}_k\|$ in the denominator, so
 $\lambda_k$ diverges once the clamp or floor used to avoid division by zero is
 reached.
-\end{proof}
+\end{pf}
 
 Corollary~\ref{cor:directions} is the paper's central observation. Two methods,
 both advertised as adaptive loss balancing, respond to the same decoupled loss
@@ -467,7 +474,7 @@ with $h$ the water depth, $g = 9.81\ \mathrm{m/s^2}$, bed slopes $S_{0x} =
 $S_d = C \cdot 0.5 \exp(-d/12)\, h$ centred at $(50,50)$~m with $d$ the
 distance to the centre. The domain is $[0,100]^2\ \mathrm{m^2}$ and $T =
 3600$~s. This system has served as a PINN benchmark in its one-dimensional form
-\cite{he2023physics}; the two-dimensional inverse problem used here adds a
+\citep{he2023physics}; the two-dimensional inverse problem used here adds a
 localised sink and three unknown parameters.
 
 The inverse problem infers $n$, $C$ and the inflow discharge $q_{x0}$ from
@@ -485,10 +492,10 @@ $\sigma \mathcal{L}_{\text{prior}}$ is one except in the identifiability study
 of \S\ref{sec:identifiability}.
 
 The network is a Fourier-feature encoding
-\cite{tancik2020fourier,rahaman2019spectral} ($m = 64 \to 128$ features,
+\citep{tancik2020fourier,rahaman2019spectral} ($m = 64 \to 128$ features,
 $\sigma_B = 1.0$) followed by a four-hidden-layer MLP with 128 neurons per
-layer and $\tanh$ activations, initialised as in \cite{glorot2010understanding}.
-Training uses Adam \cite{kingma2014adam} with learning rate
+layer and $\tanh$ activations, initialised as in \citep{glorot2010understanding}.
+Training uses Adam \citep{kingma2014adam} with learning rate
 $3\times10^{-4}$, a \texttt{ReduceLROnPlateau} scheduler and gradient clipping
 at $1.0$; all runs use 30{,}000 epochs and 2{,}000 collocation points unless
 stated otherwise. Everything runs on CPU.
@@ -519,12 +526,12 @@ gradient norms. This is the relative-norm balancer of
 Corollary~\ref{cor:directions}(i), and is representative of
 efficiency-motivated implementations that restrict the anchor to the last
 layer.
-\item \textbf{LRA}: learning-rate annealing \cite{wang2021understanding},
+\item \textbf{LRA}: learning-rate annealing \citep{wang2021understanding},
 $\lambda_k = \max_j \lVert\nabla_\theta \mathcal{L}_j\rVert /
 \lVert\nabla_\theta \mathcal{L}_k\rVert$, with the anchor taken over the full
 parameter vector. This is the inverse-ratio balancer of
 Corollary~\ref{cor:directions}(ii).
-\item \textbf{ReLoBRaLo} \cite{bischof2021multi}: balances using loss ratios
+\item \textbf{ReLoBRaLo} \citep{bischof2021multi}: balances using loss ratios
 through a softmax with a random lookback, and computes no per-loss gradients.
 \end{itemize}
 
@@ -785,7 +792,7 @@ qualitative behaviour reported above is not a seed artefact.
 
 To check that the mechanism is not specific to the shallow-water problem we
 repeat the comparison on the 2D Navier--Stokes cylinder wake at
-$\mathrm{Re}=100$, using the CFD data of \cite{raissi2019physics}. This is a
+$\mathrm{Re}=100$, using the CFD data of \citep{raissi2019physics}. This is a
 \emph{forward} problem: the loss consists of a PDE residual and a data misfit
 only, and there is no parameter prior, so the decoupling mechanism of
 Proposition~\ref{prop:decoupling} is absent by construction. The point of the
@@ -907,7 +914,9 @@ content of the publication.
 The author acknowledges the foundational PINN codebase by Maziar Raissi et al.
 
 % ======================================================================
-\bibliographystyle{elsarticle-num}
+\printcredits
+
+\bibliographystyle{cas-model2-names}
 \bibliography{references}
 
 \end{document}
