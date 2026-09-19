@@ -509,6 +509,25 @@ LRA + ARB         & $0$ & $1.0$ & $0.002\%$ & $0.001\%$ \\
 \end{tabular}
 \end{table}
 
+Figure~\ref{fig:failure} shows the prior weight over training for the three
+balancers. The trajectories separate by more than twelve orders of magnitude
+and illustrate the two directions of Corollary~\ref{cor:directions} directly:
+the relative-norm balancer decays towards zero, the inverse-ratio balancer
+diverges, and only the loss-statistics balancer leaves the weight of a
+decoupled loss near unity.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.72\textwidth]{figures/fig_failure.pdf}
+\caption{Prior weight during training when all four losses are balanced
+jointly. The decoupled prior is assigned a coupling ratio of exactly zero by
+all three balancers, and each then responds according to its functional form:
+LL-EMA decays to $1.6\times10^{-5}$, LRA diverges to $3.3\times10^{7}$, and
+ReLoBRaLo --- which uses loss statistics rather than gradients --- remains
+bounded near one.}
+\label{fig:failure}
+\end{figure}
+
 The diagnostic assigns the prior a coupling ratio of exactly zero in every
 case, as Proposition~\ref{prop:decoupling} predicts. LL-EMA then drives its
 weight to $1.6\times10^{-5}$ --- the prior is removed from the objective ---
@@ -585,6 +604,22 @@ ReLoBRaLo's parameters sit $0.05\%$ from the displaced prior centre and
 $19.9\%$ from the truth: it followed the prior exactly. LRA is even more
 extreme at $0.00\%$. LL-EMA follows neither, having discarded the prior and
 left the parameters unconstrained. The data does not pull any of them back.
+Figure~\ref{fig:misspec} shows this comparison directly: for both balancers
+that use the prior the bar for ``error to the prior centre'' is two to four
+orders of magnitude shorter than the bar for ``error to the truth''.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.62\textwidth]{figures/fig_misspecification.pdf}
+\caption{Prior-misspecification test: the prior centre is displaced $+20\%$
+from the true parameters while the data is unchanged. ReLoBRaLo and LRA place
+the parameters almost exactly on the displaced centre, so a balancer that
+follows the prior cannot be distinguished from one that solves the inverse
+problem unless this test is performed. LL-EMA, having discarded the prior,
+matches neither. (LRA's error to the prior centre is $0.000\%$, drawn at the
+axis floor on the logarithmic scale.)}
+\label{fig:misspec}
+\end{figure}
 
 \textbf{Prior strength.} Varying the prior weight $\sigma$ confirms the same
 picture and locates the transition.
@@ -606,10 +641,21 @@ $1.0$   & $0.640\%$ & $0.048\%$ & $0.071\%$ \\
 \end{tabular}
 \end{table}
 
-Two facts stand out. The field error is constant ($0.635$--$0.644\%$) across
-four orders of magnitude of prior strength: the \emph{field} is determined by
-the data. The parameter errors, by contrast, track the prior weight almost
-exactly. With no prior at all the drainage coefficient is off by $54.99\%$, so
+Figure~\ref{fig:ident} plots the same data. Two facts stand out. The field
+error is constant ($0.635$--$0.644\%$) across four orders of magnitude of
+prior strength: the \emph{field} is determined by the data. The parameter
+errors, by contrast, track the prior weight almost exactly.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.60\textwidth]{figures/fig_identifiability.pdf}
+\caption{Prior-strength study (ReLoBRaLo, prior balanced). The field error is
+flat across four orders of magnitude of prior strength, while both parameter
+errors fall steeply with it. The field is therefore fixed by the data and the
+parameters by the prior; with no prior ($\sigma = 0$) the drainage coefficient
+is unidentified to within a factor of two.}
+\label{fig:ident}
+\end{figure} With no prior at all the drainage coefficient is off by $54.99\%$, so
 the data alone does not identify it --- unsurprising, since the drainage
 depression is only $\sim 1\%$ of the water depth, and a $20\%$ change in $C$
 moves $h$ by roughly $0.2\%$, below the $0.5\%$ observation noise.
@@ -624,11 +670,21 @@ a prior has been silently discarded.
 
 \subsection{Repairing the Failures}
 
-Table~\ref{tab:main} already reports the repaired runs; we summarise the
-effect sizes here. For LL-EMA the wrapper raises the prior weight from
-$1.6\times10^{-5}$ to $1.0$ and reduces the drainage-coefficient error from
-$52.9\%$ to $0.030\%$. For LRA it bounds the weight that previously reached
-$3.3\times10^7$. In both cases the field error is unchanged to within the
+Figure~\ref{fig:fix} summarises the effect of the wrapper. For LL-EMA it
+raises the prior weight from $1.6\times10^{-5}$ to $1.0$ and reduces the
+drainage-coefficient error from $52.9\%$ to $0.030\%$. For LRA it bounds the
+weight that previously reached $3.3\times10^7$.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.95\textwidth]{figures/fig_fix.pdf}
+\caption{Effect of the anchor-robust wrapper, which was given no information
+about which loss is decoupled. (a) The prior weight is bounded at one for both
+gradient-norm balancers. (b) The parameter error of LL-EMA falls from $52.9\%$
+to $0.030\%$; LRA's apparent accuracy without the wrapper is the circular
+result discussed in the text, not a successful inference.}
+\label{fig:fix}
+\end{figure} In both cases the field error is unchanged to within the
 spread of the baseline runs ($0.680\%$ and $0.839\%$ versus $0.632\%$ and
 $0.708\%$), confirming that the wrapper alters only the treatment of the
 decoupled loss.
