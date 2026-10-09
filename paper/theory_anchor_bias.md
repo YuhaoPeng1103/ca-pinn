@@ -181,3 +181,30 @@ as c = 0.06.
 The gamma = 0 rows have no finite relative error (the prediction is 0 and the
 measured value is 0, or the prediction diverges); they are the qualitative
 regime and are reported separately rather than as a relative error.
+
+## 8. The wrapper repairs both directions in MTL
+
+`experiments/train_mtl_arb.py` compares, at gamma = 0 (auxiliary exactly
+decoupled), the balancer alone against the same balancer wrapped by the
+anchor-robust rule. The auxiliary loss is identical across the two arms, so its
+value is directly comparable.
+
+| balancer | arm | w_aux | L_aux | mean task loss |
+|---|---|---|---|---|
+| relative-norm | plain | 6.6e-11 | 0.0152 | 0.0151 |
+| relative-norm | + ARB | 1.0 | **0.0128** | **0.0136** |
+| inverse-ratio | plain | 1.3e10 | — | **0.507** |
+| inverse-ratio | + ARB | 1.0 | — | **0.210** |
+
+Without the wrapper the auxiliary loss is either switched off (relative-norm:
+w = 6.6e-11, its value stays at 0.0152 because it is never minimised) or
+allowed to dominate (inverse-ratio: w = 1.3e10, and the task loss of 0.507 is
+twenty times the 0.027 attained when the auxiliary term is benign). With the
+wrapper the weight is neutral in both cases, the auxiliary loss is actually
+driven down under the relative-norm balancer (0.0152 -> 0.0128), and the task
+loss is not damaged — it improves slightly in the first case and falls by a
+factor of 2.4 in the second.
+
+(An additional "fully coupled" arm was run for reference; its auxiliary loss has
+a different functional form because gamma enters the loss itself, so its L_aux
+is not comparable with the rows above and it is omitted here.)
