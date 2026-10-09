@@ -60,24 +60,38 @@ Substituting g_k = c_k G_k,
 
     λ_k = max_j (c_j G_j) / (c_k G_k) .                                    (3)
 
-If the maximum is attained by a fully coupled loss (c_j = 1, the typical case
-when the decoupled loss is the small one), max_j (c_j G_j) = max_j G_j, and
-dividing by λ_k⁰ = max_j G_j / G_k gives
+Write M = max_j (c_j G_j) and M_G = max_j G_j. The reference weight is
+λ_k⁰ = M_G / G_k, so in general
 
     ┌──────────────────────────────────────────────┐
-    │  λ_k / λ_k⁰  =  1 / c_k                       │              (4)
+    │  λ_k / λ_k⁰  =  M / (c_k · M_G)               │              (4)
     └──────────────────────────────────────────────┘
 
-Remarkably, (4) is **independent of every other loss**: the over-weighting of a
-partially coupled loss depends only on its own coupling ratio. As c_k → 0 the
-weight diverges, so an exactly decoupled loss dominates the objective.
+**A caveat we had to correct during validation.** Equation (4) simplifies to
+1/c_k only when the maximum is attained by a *fully coupled* loss, so that
+M = M_G. That premise is easy to violate: if every loss is itself only
+partially coupled — which is the normal situation when the anchor is a proper
+subset of the parameters, since then *no* loss has c = 1 — then M < M_G and
+the bias is milder than 1/c_k by exactly the factor M/M_G.
+
+In the special case where all couplings are comparable (c_j ≈ c), (4) collapses
+to λ_k/λ_k⁰ ≈ 1/c_k again, recovering the clean form. With a full-parameter
+anchor every c_k = 1 by definition, (4) gives λ_k = λ_k⁰ identically: an
+inverse-ratio balancer then exhibits *no* anchor bias at all, and its
+mis-treatment of a sparse-support loss (Section 6) must be attributed to that
+other mechanism rather than to decoupling. As c_k → 0 the weight diverges
+regardless of the factor, so an exactly decoupled loss still dominates.
 
 ## 4. Summary and interpretation
 
 | balancer | bias  λ_k/λ_k⁰ | limit as c_k → 0 | depends on |
 |---|---|---|---|
 | relative-norm | c_k · S/S_c | 0 (loss switched off) | c_k and the loss's gradient share |
-| inverse-ratio | 1/c_k | ∞ (loss dominates) | c_k only |
+| inverse-ratio | M / (c_k · M_G) | ∞ (loss dominates) | c_k and the coupling of the dominant loss |
+
+Both are exact and hold for any number of losses; neither requires the other
+losses to be fully coupled. Equation (2) is unconditional, while (4) carries
+the factor M/M_G noted above.
 
 The same coupling ratio c_k therefore produces **opposite and unbounded**
 distortions in the two families. Both are silent: neither the objective value
@@ -137,3 +151,33 @@ gradient norm is nonetheless tiny.
 The two effects therefore reinforce each other in that setting: decoupling
 drives λ → 0 under a relative-norm balancer and λ → ∞ under an inverse-ratio
 balancer, and sparse support additionally inflates the inverse-ratio weight.
+
+## 7. Validation in a multi-task training loop
+
+`experiments/train_mtl_anchor.py` trains a shared trunk with four task heads
+plus an auxiliary regulariser whose coupling to the trunk's last layer is
+controlled by `gamma` (0 gives exact decoupling). Both balancers use the same
+anchor; only the update rule differs, isolating the failure direction.
+
+Results (median relative error between measured and predicted weight ratio,
+over the last 75 % of 300 epochs):
+
+| gamma | c_aux | relative-norm err | inverse-ratio err |
+|---|---|---|---|
+| 0.00 | 0.000 | loss switched off (w = 0) | loss dominates (w = 2.5e10) |
+| 0.02 | 0.06–0.13 | 0.00 % | 0.00 % |
+| 0.10 | 0.24–0.32 | 0.00 % | 0.00 % |
+| 0.50 | 0.71–0.82 | 0.00 % | 0.00 % |
+| 2.00 | 0.95–0.98 | 0.00 % | 0.00 % |
+| 10.00 | 0.99–1.00 | 0.00 % | 0.00 % |
+
+Two things are established. First, at gamma = 0 the *same* decoupled loss is
+driven to zero by the relative-norm balancer and to 2.5e10 by the inverse-ratio
+balancer — opposite, extreme, and silent in both cases. Second, away from exact
+decoupling the measured bias agrees with (2) and (4) to within the floating
+point reported precision at every coupling tested, including couplings as weak
+as c = 0.06.
+
+The gamma = 0 rows have no finite relative error (the prediction is 0 and the
+measured value is 0, or the prediction diverges); they are the qualitative
+regime and are reported separately rather than as a relative error.
